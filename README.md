@@ -15,7 +15,7 @@ What it verifies, all with post quantum primitives only.
 - Header attestations. Consensus signs with the module lattice scheme and nothing else, so a header whose attestation is any other scheme is refused. This matches the consensus rule frozen in the conformance vectors.
 - Inclusion and state proofs. Membership under a header is checked with SHA-3 Merkle proofs, the same hashing the chain commits with.
 - Certificate proofs. Batch and tally certificates arrive as hash based STARK proofs from the prover, which rest on hashing alone with no pairing and no elliptic curve operation. The light client carries the verifier side of that certificate.
-- Identifiers. Addresses and object identifiers are the Quantova q1 and family formats, so a value in any foreign encoding does not parse.
+- Identifiers. Addresses and object identifiers are the Quantova Q1 and family formats, so a value in any foreign encoding does not parse.
 
 ## Status
 
