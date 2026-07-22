@@ -1,0 +1,9 @@
+[package]
+name = "qlc-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The corridor verification framework for the bridge light clients. It holds the one-way verification tier ratchet, the trust grade, a hash-only header-follow state machine, and the ForeignVerifier seam whose concrete classical implementations live only in Q-Oracle."
+
+[dependencies]

@@ -1,0 +1,9 @@
+[package]
+name = "qlc-bitcoin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Off-chain SHA-256d SPV verification for the Bitcoin corridor. Proof of work header chain and Merkle inclusion, hashing only, from a self-contained SHA-256. No foreign public-key cryptography and no banned dependency. The verified fact is carried to the chain as an ML-DSA attestation and a STARK."
+
+[dependencies]
