@@ -3,6 +3,13 @@
 version = 3
 
 [[package]]
+name = "qlc-airlock"
+version = "0.1.0"
+dependencies = [
+ "qlc-stark",
+]
+
+[[package]]
 name = "qlc-bitcoin"
 version = "0.1.0"
 
