@@ -1,0 +1,9 @@
+[package]
+name = "qlc-stark"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The statement interface for the proof-based corridors. It defines the canonical hash-only statement that a light-client verification proves. Proving runs on the Quantova prover off chain and the prover and verifier are seams here, not implementations."
+
+[dependencies]

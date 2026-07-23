@@ -1,0 +1,10 @@
+[package]
+name = "qlc-airlock"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "The Airlock ingress grammar. It parses exactly the two post quantum artifacts that may cross onto the chain, an ML-DSA attestation and a hash STARK, and makes every foreign artifact unparseable. All foreign verification happens off chain in the oracle so no foreign key and no foreign hash ever reaches the chain."
+
+[dependencies]
+qlc-stark = { path = "../qlc-stark" }
