@@ -6,6 +6,8 @@ members = [
     "crates/qlc-registry",
     "crates/qlc-stark",
     "crates/qlc-airlock",
+    "crates/qlc-ethereum",
+    "crates/qlc-cosmos",
 ]
 
 [workspace.package]

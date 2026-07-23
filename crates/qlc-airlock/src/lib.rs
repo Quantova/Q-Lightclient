@@ -207,7 +207,6 @@ mod tests {
             StatementKind::BitcoinSpv,
             StatementKind::EvmLightClient,
             StatementKind::CosmosTendermint,
-            StatementKind::SubstrateGrandpa,
         ] {
             let statement = StarkStatement { corridor_id: 1, kind, public_input_digest: [9u8; 32] };
             let bytes = encode_ingress(&ml_dsa_attestation(), &statement, &[0x02u8; 8]);

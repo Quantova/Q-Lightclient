@@ -47,7 +47,6 @@ pub fn is_proof_corridor(kind: StatementKind) -> bool {
         StatementKind::BitcoinSpv
             | StatementKind::EvmLightClient
             | StatementKind::CosmosTendermint
-            | StatementKind::SubstrateGrandpa
     )
 }
 
@@ -149,21 +148,6 @@ pub fn cosmos_tendermint(
     }
 }
 
-pub fn substrate_grandpa(
-    corridor_id: u32,
-    anchor: [u8; ANCHOR_LEN],
-    event: EventClaim,
-    finality_depth: u32,
-) -> ProofStatement {
-    ProofStatement {
-        corridor_id,
-        kind: StatementKind::SubstrateGrandpa,
-        anchor,
-        event,
-        finality_depth,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,10 +182,6 @@ mod tests {
             cosmos_tendermint(8, [0u8; 32], sample_event(), 2).kind,
             StatementKind::CosmosTendermint
         );
-        assert_eq!(
-            substrate_grandpa(9, [0u8; 32], sample_event(), 1).kind,
-            StatementKind::SubstrateGrandpa
-        );
     }
 
     #[test]
@@ -210,7 +190,6 @@ mod tests {
             bitcoin_spv(0, [0xa0u8; 32], sample_event(), 6),
             evm_light_client(1, [0xa1u8; 32], sample_event(), 64),
             cosmos_tendermint(8, [0xa2u8; 32], sample_event(), 2),
-            substrate_grandpa(9, [0xa3u8; 32], sample_event(), 1),
         ] {
             assert_eq!(ProofStatement::decode(&s.encode()), Some(s));
         }

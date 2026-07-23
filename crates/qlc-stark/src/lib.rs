@@ -9,7 +9,6 @@ pub enum StatementKind {
     LightClientStep,
     EvmLightClient,
     CosmosTendermint,
-    SubstrateGrandpa,
 }
 
 impl StatementKind {
@@ -20,7 +19,6 @@ impl StatementKind {
             StatementKind::LightClientStep => 3,
             StatementKind::EvmLightClient => 4,
             StatementKind::CosmosTendermint => 5,
-            StatementKind::SubstrateGrandpa => 6,
         }
     }
 
@@ -31,7 +29,6 @@ impl StatementKind {
             3 => Some(StatementKind::LightClientStep),
             4 => Some(StatementKind::EvmLightClient),
             5 => Some(StatementKind::CosmosTendermint),
-            6 => Some(StatementKind::SubstrateGrandpa),
             _ => None,
         }
     }
