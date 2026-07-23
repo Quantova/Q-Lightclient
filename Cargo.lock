@@ -12,6 +12,9 @@ dependencies = [
 [[package]]
 name = "qlc-bitcoin"
 version = "0.1.0"
+dependencies = [
+ "qlc-stark",
+]
 
 [[package]]
 name = "qlc-core"

@@ -1,0 +1,343 @@
+use crate::params::NetworkParams;
+use crate::retarget::compute_retarget;
+use crate::work::{block_work, U256};
+use crate::{fold_merkle_branch, BlockHeader, MerkleStep, SpvError};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedChain {
+    pub start_height: u32,
+    pub tip_height: u32,
+    pub tip_hash: [u8; 32],
+    pub work: U256,
+    headers: Vec<BlockHeader>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConfirmedDeposit {
+    pub block_hash: [u8; 32],
+    pub merkle_root: [u8; 32],
+    pub deposit_height: u32,
+    pub confirmations: u32,
+}
+
+pub fn bits_expectation(
+    height: u32,
+    prev_bits: u32,
+    this_bits: u32,
+    params: &NetworkParams,
+    index: usize,
+) -> Result<(), SpvError> {
+    if height % params.retarget_interval() == 0 || this_bits == prev_bits {
+        Ok(())
+    } else {
+        Err(SpvError::RetargetOnANonBoundary { index })
+    }
+}
+
+pub fn verify_chain(
+    headers: &[BlockHeader],
+    start_height: u32,
+    params: &NetworkParams,
+) -> Result<VerifiedChain, SpvError> {
+    if headers.is_empty() {
+        return Err(SpvError::EmptyChain);
+    }
+    let mut work = U256::ZERO;
+    for (i, h) in headers.iter().enumerate() {
+        if !h.meets_pow() {
+            return Err(SpvError::PowNotMet);
+        }
+        let height = start_height + i as u32;
+        if i > 0 {
+            let prev = &headers[i - 1];
+            if h.prev_block != prev.block_hash() {
+                return Err(SpvError::BrokenLink { index: i });
+            }
+            bits_expectation(height, prev.bits, h.bits, params, i)?;
+        }
+        work = work.wrapping_add(&block_work(h.bits));
+    }
+    let last = headers[headers.len() - 1];
+    Ok(VerifiedChain {
+        start_height,
+        tip_height: start_height + (headers.len() as u32 - 1),
+        tip_hash: last.block_hash(),
+        work,
+        headers: headers.to_vec(),
+    })
+}
+
+pub fn check_retarget_boundary(
+    period_first: &BlockHeader,
+    period_last: &BlockHeader,
+    boundary: &BlockHeader,
+    params: &NetworkParams,
+) -> Result<(), SpvError> {
+    if !boundary.meets_pow() {
+        return Err(SpvError::PowNotMet);
+    }
+    if boundary.prev_block != period_last.block_hash() {
+        return Err(SpvError::BrokenLink { index: 0 });
+    }
+    let actual = period_last.timestamp.wrapping_sub(period_first.timestamp);
+    let expected = compute_retarget(period_last.bits, actual, params);
+    if boundary.bits != expected {
+        return Err(SpvError::RetargetMismatch { index: 0 });
+    }
+    Ok(())
+}
+
+pub fn heavier<'a>(a: &'a VerifiedChain, b: &'a VerifiedChain) -> &'a VerifiedChain {
+    if b.work > a.work {
+        b
+    } else {
+        a
+    }
+}
+
+impl VerifiedChain {
+    pub fn header_at(&self, height: u32) -> Option<&BlockHeader> {
+        if height < self.start_height || height > self.tip_height {
+            return None;
+        }
+        self.headers.get((height - self.start_height) as usize)
+    }
+
+    pub fn confirmations(&self, height: u32) -> Option<u32> {
+        if height < self.start_height || height > self.tip_height {
+            return None;
+        }
+        Some(self.tip_height - height + 1)
+    }
+
+    pub fn verify_deposit(
+        &self,
+        deposit_height: u32,
+        txid: [u8; 32],
+        branch: &[MerkleStep],
+        required_confirmations: u32,
+    ) -> Result<ConfirmedDeposit, SpvError> {
+        let header = self
+            .header_at(deposit_height)
+            .ok_or(SpvError::HeightOutOfRange)?;
+        if fold_merkle_branch(txid, branch) != header.merkle_root {
+            return Err(SpvError::MerkleMismatch);
+        }
+        let confirmations = self.tip_height - deposit_height + 1;
+        if confirmations < required_confirmations {
+            return Err(SpvError::InsufficientConfirmations {
+                have: confirmations,
+                need: required_confirmations,
+            });
+        }
+        Ok(ConfirmedDeposit {
+            block_hash: header.block_hash(),
+            merkle_root: header.merkle_root,
+            deposit_height,
+            confirmations,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::params::BITCOIN;
+
+    fn from_hex(s: &str) -> Vec<u8> {
+        let b = s.as_bytes();
+        let mut out = Vec::with_capacity(b.len() / 2);
+        let mut i = 0;
+        while i < b.len() {
+            let hi = (b[i] as char).to_digit(16).unwrap() as u8;
+            let lo = (b[i + 1] as char).to_digit(16).unwrap() as u8;
+            out.push((hi << 4) | lo);
+            i += 2;
+        }
+        out
+    }
+
+    fn reversed(s: &str) -> [u8; 32] {
+        let mut bytes = from_hex(s);
+        bytes.reverse();
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&bytes);
+        out
+    }
+
+    const B0: &str = "0100000000000000000000000000000000000000000000000000000000000000000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a29ab5f49ffff001d1dac2b7c";
+    const B1: &str = "010000006fe28c0ab6f1b372c1a6a246ae63f74f931e8365e15a089c68d6190000000000982051fd1e4ba744bbbe680e1fee14677ba1a3c3540bf7b1cdb606e857233e0e61bc6649ffff001d01e36299";
+    const B2: &str = "010000004860eb18bf1b1620e37e9490fc8a427514416fd75159ab86688e9a8300000000d5fdcc541e25de1c7a5addedf24858b8bb665c9f36ef744ee42c316022c90f9bb0bc6649ffff001d08d2bd61";
+    const B3: &str = "01000000bddd99ccfda39da1b108ce1a5d70038d0a967bacb68b6b63065f626a0000000044f672226090d85db9a9f2fbfe5f0f9609b387af7be5b7fbb7a1767c831c9e995dbe6649ffff001d05e0ed6d";
+    const B4: &str = "010000004944469562ae1c2c74d9a535e00b6f3e40ffbad4f2fda3895501b582000000007a06ea98cd40ba2e3288262b28638cec5337c1456aaf5eedc8e9e5a20f062bdf8cc16649ffff001d2bfee0a9";
+    const B5: &str = "0100000085144a84488ea88d221c8bd6c059da090e88f8a2c99690ee55dbba4e00000000e11c48fecdd9e72510ca84f023370c9a38bf91ac5cae88019bee94d24528526344c36649ffff001d1d03e477";
+    const B6: &str = "01000000fc33f596f822a0a1951ffdbf2a897b095636ad871707bf5d3162729b00000000379dfb96a5ea8c81700ea4ac6b97ae9a9312b2d4301a29580e924ee6761a2520adc46649ffff001d189c4c97";
+
+    const B170: &str = "0100000055bd840a78798ad0da853f68974f3d183e2bd1db6a842c1feecf222a00000000ff104ccb05421ab93e63f8c3ce5c2c2e9dbb37de2764b3a3175c8166562cac7d51b96a49ffff001d283e9e70";
+    const B171: &str = "01000000eea2d48d2fced4346842835c659e493d323f06d4034469a8905714d100000000f293c86973e758ccd11975fa464d4c3e8500979c95425c7be6f0a65314d2f2d5c9ba6a49ffff001d07a8f226";
+    const B172: &str = "01000000e0b4bf8d80026bbec5370a7bb06af54257a9679cef387fab8c53ecc900000000d578b0399b91624a8da53552035fecdd8f4ba2b9c69dfbda68d651fcb9f99c388dbc6a49ffff001d35464c5d";
+    const B173: &str = "0100000054686892dd112de389acc225accc0118765f9c51c2ec9306f6abefe3000000005209a3e77e3679703f6b7f039fb9e054d7862e6eaad617e8e3f3d81d297e966015be6a49ffff001d21ac0323";
+    const B174: &str = "01000000c585ac476b5878f0f1917826430b3daec278ef28c121c2ec9dd6e9dc000000008195110f0743ab43d4146798c962b8d101e325f4afdf8e936d15c2d51371b9cc7dc06a49ffff001d32915d0f";
+    const B175: &str = "01000000c052286e779e7e48397d8c39fee98a3a5718c82dd6bc5b71eebed8a700000000903bb52cc35576a52e9d8f35a901073d33145b6f7be16aab1aa328e8153dfb4874c46a49ffff001d227dd986";
+
+    const B30240: &str = "01000000e6bf7fd7f7790a63786faa878d0dc7fd8f2ff365732e45862c66075100000000700d342f65c7b6834dffb615358a1897016f0448913372190cbe3d27a4b53355b1512b4bffff001dbfb02519";
+    const B32255: &str = "0100000049c1daab3b6536ff1b2633c3a316a6e06ec287676cdeec4ca7baae6b00000000ac10b36b8f354b3353207de15940a5edbc05bb8364af75b4b5409e7823f2b48923ec3a4bffff001dbd5fa412";
+    const B32256: &str = "010000004b0360d834a330ec7833e30e1f523ee05a0793361e29a73421964f980000000027b64a020af294e903feed93768705336a20090612a043f47af462a2f5e5b564f8ee3a4b6ad8001dd3a43707";
+
+    const TXID0_170: &str = "b1fea52486ce0c62bb442b530a3f0132b826c74e473d1f2c220bfa78111c5082";
+    const TXID1_170: &str = "f4184fc596403b9d638783cf57adfe4c75c605f6356fbc91338530e9831e9e16";
+
+    fn header(hex: &str) -> BlockHeader {
+        BlockHeader::parse(&from_hex(hex)).unwrap()
+    }
+
+    fn early_chain() -> Vec<BlockHeader> {
+        [B0, B1, B2, B3, B4, B5, B6].iter().map(|h| header(h)).collect()
+    }
+
+    #[test]
+    fn a_real_seven_block_bitcoin_chain_verifies_and_accumulates_work() {
+        let chain = verify_chain(&early_chain(), 0, &BITCOIN).unwrap();
+        assert_eq!(chain.tip_height, 6);
+        assert_eq!(chain.work, U256::from_u64(7 * 4_295_032_833));
+        assert_eq!(chain.tip_hash, header(B6).block_hash());
+    }
+
+    #[test]
+    fn a_header_that_fails_its_proof_of_work_is_rejected() {
+        let mut headers = early_chain();
+        headers[3].nonce = headers[3].nonce.wrapping_add(1);
+        assert_eq!(verify_chain(&headers, 0, &BITCOIN), Err(SpvError::PowNotMet));
+    }
+
+    #[test]
+    fn a_gap_in_the_chain_breaks_the_prev_link() {
+        let headers = vec![header(B0), header(B1), header(B3)];
+        assert_eq!(
+            verify_chain(&headers, 0, &BITCOIN),
+            Err(SpvError::BrokenLink { index: 2 })
+        );
+    }
+
+    #[test]
+    fn a_lighter_real_chain_loses_to_the_heavier_real_chain() {
+        let heavy = verify_chain(&early_chain(), 0, &BITCOIN).unwrap();
+        let light = verify_chain(&[header(B0), header(B1)], 0, &BITCOIN).unwrap();
+        assert!(heavy.work > light.work);
+        assert_eq!(heavier(&heavy, &light).tip_hash, heavy.tip_hash);
+        assert_eq!(heavier(&light, &heavy).tip_hash, heavy.tip_hash);
+    }
+
+    #[test]
+    fn selection_is_by_cumulative_work_not_by_length() {
+        let heavy_short = VerifiedChain {
+            start_height: 0,
+            tip_height: 0,
+            tip_hash: [0x11u8; 32],
+            work: U256::from_u64(9_000_000_000),
+            headers: vec![header(B0)],
+        };
+        let light_long = VerifiedChain {
+            start_height: 0,
+            tip_height: 6,
+            tip_hash: [0x22u8; 32],
+            work: U256::from_u64(4_000_000_000),
+            headers: early_chain(),
+        };
+        assert!(light_long.headers.len() > heavy_short.headers.len());
+        assert_eq!(heavier(&heavy_short, &light_long).tip_hash, heavy_short.tip_hash);
+    }
+
+    #[test]
+    fn the_real_difficulty_retarget_boundary_verifies() {
+        assert!(check_retarget_boundary(
+            &header(B30240),
+            &header(B32255),
+            &header(B32256),
+            &BITCOIN
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn a_boundary_whose_target_does_not_match_the_period_is_rejected() {
+        let mut first = header(B30240);
+        first.timestamp -= 500_000;
+        assert_eq!(
+            check_retarget_boundary(&first, &header(B32255), &header(B32256), &BITCOIN),
+            Err(SpvError::RetargetMismatch { index: 0 })
+        );
+    }
+
+    #[test]
+    fn a_bits_change_off_a_retarget_boundary_is_rejected() {
+        assert_eq!(
+            bits_expectation(3, 0x1d00ffff, 0x1d00fffe, &BITCOIN, 1),
+            Err(SpvError::RetargetOnANonBoundary { index: 1 })
+        );
+    }
+
+    #[test]
+    fn bits_may_change_on_a_retarget_boundary() {
+        assert!(bits_expectation(2016, 0x1d00ffff, 0x1d00d86a, &BITCOIN, 1).is_ok());
+    }
+
+    #[test]
+    fn bits_hold_constant_within_a_retarget_period() {
+        assert!(bits_expectation(5, 0x1d00ffff, 0x1d00ffff, &BITCOIN, 1).is_ok());
+    }
+
+    #[test]
+    fn a_deposit_with_a_real_merkle_branch_verifies_at_the_confirmation_depth() {
+        let headers: Vec<BlockHeader> = [B170, B171, B172, B173, B174, B175]
+            .iter()
+            .map(|h| header(h))
+            .collect();
+        let chain = verify_chain(&headers, 170, &BITCOIN).unwrap();
+        assert_eq!(chain.confirmations(170), Some(6));
+
+        let txid0 = reversed(TXID0_170);
+        let branch = [MerkleStep {
+            hash: reversed(TXID1_170),
+            sibling_on_left: false,
+        }];
+        let deposit = chain
+            .verify_deposit(170, txid0, &branch, BITCOIN.confirmation_depth)
+            .unwrap();
+        assert_eq!(deposit.confirmations, 6);
+        assert_eq!(deposit.block_hash, header(B170).block_hash());
+    }
+
+    #[test]
+    fn a_deposit_below_the_confirmation_depth_is_rejected() {
+        let headers: Vec<BlockHeader> = [B170, B171, B172].iter().map(|h| header(h)).collect();
+        let chain = verify_chain(&headers, 170, &BITCOIN).unwrap();
+        let txid0 = reversed(TXID0_170);
+        let branch = [MerkleStep {
+            hash: reversed(TXID1_170),
+            sibling_on_left: false,
+        }];
+        assert_eq!(
+            chain.verify_deposit(170, txid0, &branch, BITCOIN.confirmation_depth),
+            Err(SpvError::InsufficientConfirmations { have: 3, need: 6 })
+        );
+    }
+
+    #[test]
+    fn a_merkle_branch_to_a_different_root_fails() {
+        let headers: Vec<BlockHeader> = [B170, B171, B172, B173, B174, B175]
+            .iter()
+            .map(|h| header(h))
+            .collect();
+        let chain = verify_chain(&headers, 170, &BITCOIN).unwrap();
+        let txid0 = reversed(TXID0_170);
+        let wrong_sibling = [MerkleStep {
+            hash: [0x99u8; 32],
+            sibling_on_left: false,
+        }];
+        assert_eq!(
+            chain.verify_deposit(170, txid0, &wrong_sibling, BITCOIN.confirmation_depth),
+            Err(SpvError::MerkleMismatch)
+        );
+    }
+}

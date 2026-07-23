@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "The seed corridor and asset registry. It carries the origin chains toward the 36 target and their origin-tagged assets toward the 70 target, each with a verification tier, a trust grade, and a required confirmation depth. Registry growth is by standards proposal only."
+description = "The corridor and asset registry. It carries the 37 origin chains and their origin-tagged assets toward the 70 target. Every network resolves a verification tier and a required finality config with confirmation depth, deterministic or probabilistic kind, and reorg depth. Registry growth is by standards proposal only."
 
 [dependencies]
 qlc-core = { path = "../qlc-core" }

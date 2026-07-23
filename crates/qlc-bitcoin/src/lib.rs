@@ -1,8 +1,21 @@
 #![forbid(unsafe_code)]
 
+pub mod chain;
+pub mod params;
+pub mod retarget;
 pub mod sha256;
+pub mod spv;
+pub mod work;
 
+pub use chain::{
+    bits_expectation, check_retarget_boundary, heavier, verify_chain, ConfirmedDeposit,
+    VerifiedChain,
+};
+pub use params::{network_params, Network, NetworkParams, BITCOIN, BITCOIN_CASH};
+pub use retarget::compute_retarget;
 pub use sha256::{double_sha256, sha256};
+pub use spv::{DepositProof, ProvenDeposit};
+pub use work::{block_work, U256};
 
 pub const HEADER_LEN: usize = 80;
 
@@ -23,6 +36,10 @@ pub enum SpvError {
     BrokenLink { index: usize },
     EmptyChain,
     MerkleMismatch,
+    RetargetOnANonBoundary { index: usize },
+    RetargetMismatch { index: usize },
+    HeightOutOfRange,
+    InsufficientConfirmations { have: u32, need: u32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,12 +102,12 @@ pub fn compact_to_target(bits: u32) -> [u8; 32] {
     let mant = bits & 0x007f_ffff;
     let mant_bytes = [(mant >> 16) as u8, (mant >> 8) as u8, mant as u8];
     let mut target = [0u8; 32];
-    if exp >= 3 && exp <= 32 {
+    if (3..=32).contains(&exp) {
         let msb_index = 32 - exp;
-        for i in 0..3 {
+        for (i, b) in mant_bytes.iter().enumerate() {
             let idx = msb_index + i;
             if idx < 32 {
-                target[idx] = mant_bytes[i];
+                target[idx] = *b;
             }
         }
     } else if exp < 3 {
