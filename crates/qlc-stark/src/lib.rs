@@ -1,6 +1,9 @@
 #![forbid(unsafe_code)]
 
 pub mod corridors;
+pub mod sha3;
+
+pub use sha3::sha3_256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatementKind {

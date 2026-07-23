@@ -23,24 +23,21 @@ pub enum NetworkId {
     Injective = 19,
     Sei = 20,
     Kava = 21,
-    Polkadot = 22,
-    Kusama = 23,
-    Bittensor = 24,
-    Solana = 25,
-    Tron = 26,
-    XrpLedger = 27,
-    Cardano = 28,
-    Near = 29,
-    Sui = 30,
-    Aptos = 31,
-    Hedera = 32,
-    Algorand = 33,
-    Ton = 34,
-    Stellar = 35,
-    RobinhoodChain = 36,
+    Solana = 22,
+    Tron = 23,
+    XrpLedger = 24,
+    Cardano = 25,
+    Near = 26,
+    Sui = 27,
+    Aptos = 28,
+    Hedera = 29,
+    Algorand = 30,
+    Ton = 31,
+    Stellar = 32,
+    RobinhoodChain = 33,
 }
 
-pub const NETWORK_COUNT: u32 = 37;
+pub const NETWORK_COUNT: u32 = 34;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnknownNetworkId(pub u32);
@@ -72,21 +69,18 @@ impl TryFrom<u32> for NetworkId {
             19 => Ok(NetworkId::Injective),
             20 => Ok(NetworkId::Sei),
             21 => Ok(NetworkId::Kava),
-            22 => Ok(NetworkId::Polkadot),
-            23 => Ok(NetworkId::Kusama),
-            24 => Ok(NetworkId::Bittensor),
-            25 => Ok(NetworkId::Solana),
-            26 => Ok(NetworkId::Tron),
-            27 => Ok(NetworkId::XrpLedger),
-            28 => Ok(NetworkId::Cardano),
-            29 => Ok(NetworkId::Near),
-            30 => Ok(NetworkId::Sui),
-            31 => Ok(NetworkId::Aptos),
-            32 => Ok(NetworkId::Hedera),
-            33 => Ok(NetworkId::Algorand),
-            34 => Ok(NetworkId::Ton),
-            35 => Ok(NetworkId::Stellar),
-            36 => Ok(NetworkId::RobinhoodChain),
+            22 => Ok(NetworkId::Solana),
+            23 => Ok(NetworkId::Tron),
+            24 => Ok(NetworkId::XrpLedger),
+            25 => Ok(NetworkId::Cardano),
+            26 => Ok(NetworkId::Near),
+            27 => Ok(NetworkId::Sui),
+            28 => Ok(NetworkId::Aptos),
+            29 => Ok(NetworkId::Hedera),
+            30 => Ok(NetworkId::Algorand),
+            31 => Ok(NetworkId::Ton),
+            32 => Ok(NetworkId::Stellar),
+            33 => Ok(NetworkId::RobinhoodChain),
             other => Err(UnknownNetworkId(other)),
         }
     }
@@ -122,9 +116,6 @@ pub fn all_network_ids() -> [NetworkId; NETWORK_COUNT as usize] {
         NetworkId::Injective,
         NetworkId::Sei,
         NetworkId::Kava,
-        NetworkId::Polkadot,
-        NetworkId::Kusama,
-        NetworkId::Bittensor,
         NetworkId::Solana,
         NetworkId::Tron,
         NetworkId::XrpLedger,
@@ -146,7 +137,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     #[test]
-    fn every_id_from_zero_to_thirty_six_decodes() {
+    fn every_id_from_zero_to_thirty_three_decodes() {
         for raw in 0..NETWORK_COUNT {
             assert!(
                 NetworkId::try_from(raw).is_ok(),

@@ -35,9 +35,6 @@ pub fn corridor(id: NetworkId) -> Corridor {
         NetworkId::Injective => Corridor { id, name: "Injective", tier: VerificationTier::LightClient, finality: FinalityConfig::deterministic(1) },
         NetworkId::Sei => Corridor { id, name: "Sei", tier: VerificationTier::LightClient, finality: FinalityConfig::deterministic(1) },
         NetworkId::Kava => Corridor { id, name: "Kava", tier: VerificationTier::LightClient, finality: FinalityConfig::deterministic(1) },
-        NetworkId::Polkadot => Corridor { id, name: "Polkadot", tier: VerificationTier::LightClient, finality: FinalityConfig::deterministic(2) },
-        NetworkId::Kusama => Corridor { id, name: "Kusama", tier: VerificationTier::LightClient, finality: FinalityConfig::deterministic(2) },
-        NetworkId::Bittensor => Corridor { id, name: "Bittensor", tier: VerificationTier::LightClient, finality: FinalityConfig::deterministic(2) },
         NetworkId::Solana => Corridor { id, name: "Solana", tier: VerificationTier::Federated, finality: FinalityConfig::deterministic(32) },
         NetworkId::Tron => Corridor { id, name: "TRON", tier: VerificationTier::Federated, finality: FinalityConfig::deterministic(19) },
         NetworkId::XrpLedger => Corridor { id, name: "XRP Ledger", tier: VerificationTier::Federated, finality: FinalityConfig::deterministic(1) },
@@ -95,7 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn the_full_set_of_thirty_seven_corridors_is_present() {
+    fn the_full_set_of_thirty_four_corridors_is_present() {
         let corridors: Vec<Corridor> = all_network_ids().iter().map(|id| corridor(*id)).collect();
         assert_eq!(corridors.len(), NETWORK_COUNT as usize);
     }
@@ -179,9 +176,6 @@ mod tests {
             NetworkId::Injective,
             NetworkId::Sei,
             NetworkId::Kava,
-            NetworkId::Polkadot,
-            NetworkId::Kusama,
-            NetworkId::Bittensor,
             NetworkId::RobinhoodChain,
         ] {
             assert_eq!(corridor(id).tier, VerificationTier::LightClient);
