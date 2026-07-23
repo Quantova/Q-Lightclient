@@ -142,7 +142,7 @@ impl VerifiedChain {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::BITCOIN;
+    use crate::params::{BITCOIN, BITCOIN_CASH};
 
     fn from_hex(s: &str) -> Vec<u8> {
         let b = s.as_bytes();
@@ -179,6 +179,15 @@ mod tests {
     const B173: &str = "0100000054686892dd112de389acc225accc0118765f9c51c2ec9306f6abefe3000000005209a3e77e3679703f6b7f039fb9e054d7862e6eaad617e8e3f3d81d297e966015be6a49ffff001d21ac0323";
     const B174: &str = "01000000c585ac476b5878f0f1917826430b3daec278ef28c121c2ec9dd6e9dc000000008195110f0743ab43d4146798c962b8d101e325f4afdf8e936d15c2d51371b9cc7dc06a49ffff001d32915d0f";
     const B175: &str = "01000000c052286e779e7e48397d8c39fee98a3a5718c82dd6bc5b71eebed8a700000000903bb52cc35576a52e9d8f35a901073d33145b6f7be16aab1aa328e8153dfb4874c46a49ffff001d227dd986";
+    const B176: &str = "01000000089d2d7196d00f737762fe82cfd86820c6e44bb2a9dd0f5fc1fc4afd000000005c3de10cb7cb6934b0050360980f9a37a95a8bf705edfbcbd3541591ad95c16466c96a49ffff001d09338966";
+    const B177: &str = "01000000586ebdf7f1df4885ca322a3021773c6281691f9450e8b8edddf3a91600000000885e36844a21fc6078813daa25b0c331523374924d21fd63b2e939ca3fb2b407edce6a49ffff001d0931f108";
+    const B178: &str = "01000000b17df64200cd007eea9b6ac2760f69693f83f19f00352bdd99970c48000000006bf4f1083c14982eee4239a9ac2c94c5672f7da3d763bb88488936a4ac7827672bd16a49ffff001d31f068f5";
+    const B179: &str = "010000000d5ba629a32522334a8d40374b82505533f1f6117c8a906cbee06dca000000006bc3cfaf5339c2989f4892ab10bbbd5ed3db490712b5b72dfd29390ca89178c795d46a49ffff001d37f7ca97";
+    const B180: &str = "0100000070e12562bd8d2d8b2c1d298fbaa3bc4f005b4c41692850276b5aabc0000000004f1d6988f3aed27c24bcdd92ed9296afb0d58073f77da34caa8cc83718fe8cbd3cda6a49ffff001d13bfb72f";
+    const B181: &str = "01000000f2c8a8d2af43a9cd05142654e56f41d159ce0274d9cabe15a20eefb500000000366c2a0915f05db4b450c050ce7165acd55f823fee51430a8c993e0bdbb192ede5dc6a49ffff001d192d3f2f";
+    const B182: &str = "01000000e5c6af65c46bd826723a83c1c29d9efa189320458dc5298a0c8655dc0000000030c2a0d34bfb4a10d35e8166e0f5a37bce02fc1b85ff983739a191197f010f2f40df6a49ffff001d2ce7ac9e";
+    const B183: &str = "010000005dad27b228dac0272b484c390c32d95aaa38e75ba9f74ffc1178485400000000292571e03a414e493790a4bc212dac24d5d6cd5655cbefb4404dd8513b9825df6ee46a49ffff001d13fdd3c0";
+    const B184: &str = "010000008898a2630f7fe0b924cf5b986c8a8da2b2959a2d6faf8b033f516ef400000000bf20f3ca28996db0f2f884ef15a03ff53ba6ad5669ed4e14c861d5dd56a16172e5e76a49ffff001d2e11190a";
 
     const B30240: &str = "01000000e6bf7fd7f7790a63786faa878d0dc7fd8f2ff365732e45862c66075100000000700d342f65c7b6834dffb615358a1897016f0448913372190cbe3d27a4b53355b1512b4bffff001dbfb02519";
     const B32255: &str = "0100000049c1daab3b6536ff1b2633c3a316a6e06ec287676cdeec4ca7baae6b00000000ac10b36b8f354b3353207de15940a5edbc05bb8364af75b4b5409e7823f2b48923ec3a4bffff001dbd5fa412";
@@ -338,6 +347,55 @@ mod tests {
         assert_eq!(
             chain.verify_deposit(170, txid0, &wrong_sibling, BITCOIN.confirmation_depth),
             Err(SpvError::MerkleMismatch)
+        );
+    }
+
+    fn real_early_chain_through_184() -> Vec<BlockHeader> {
+        [
+            B170, B171, B172, B173, B174, B175, B176, B177, B178, B179, B180, B181, B182, B183,
+            B184,
+        ]
+        .iter()
+        .map(|h| header(h))
+        .collect()
+    }
+
+    #[test]
+    fn a_real_bitcoin_cash_deposit_verifies_at_its_confirmation_depth() {
+        let chain = verify_chain(&real_early_chain_through_184(), 170, &BITCOIN_CASH).unwrap();
+        assert_eq!(
+            chain.confirmations(170),
+            Some(BITCOIN_CASH.confirmation_depth)
+        );
+
+        let txid0 = reversed(TXID0_170);
+        let branch = [MerkleStep {
+            hash: reversed(TXID1_170),
+            sibling_on_left: false,
+        }];
+        let deposit = chain
+            .verify_deposit(170, txid0, &branch, BITCOIN_CASH.confirmation_depth)
+            .unwrap();
+        assert_eq!(deposit.confirmations, BITCOIN_CASH.confirmation_depth);
+        assert_eq!(deposit.block_hash, header(B170).block_hash());
+    }
+
+    #[test]
+    fn a_bitcoin_cash_deposit_short_of_its_confirmation_depth_is_rejected() {
+        let mut headers = real_early_chain_through_184();
+        headers.pop();
+        let chain = verify_chain(&headers, 170, &BITCOIN_CASH).unwrap();
+        let txid0 = reversed(TXID0_170);
+        let branch = [MerkleStep {
+            hash: reversed(TXID1_170),
+            sibling_on_left: false,
+        }];
+        assert_eq!(
+            chain.verify_deposit(170, txid0, &branch, BITCOIN_CASH.confirmation_depth),
+            Err(SpvError::InsufficientConfirmations {
+                have: BITCOIN_CASH.confirmation_depth - 1,
+                need: BITCOIN_CASH.confirmation_depth
+            })
         );
     }
 }

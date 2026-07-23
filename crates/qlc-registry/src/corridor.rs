@@ -16,9 +16,9 @@ pub fn corridor(id: NetworkId) -> Corridor {
         NetworkId::Bitcoin => Corridor { id, name: "Bitcoin", tier: VerificationTier::Spv, finality: FinalityConfig::probabilistic(6, 6) },
         NetworkId::BitcoinCash => Corridor { id, name: "Bitcoin Cash", tier: VerificationTier::Spv, finality: FinalityConfig::probabilistic(10, 10) },
         NetworkId::Ethereum => Corridor { id, name: "Ethereum", tier: VerificationTier::LightClient, finality: FinalityConfig::deterministic(64) },
-        NetworkId::BnbChain => Corridor { id, name: "BNB Chain", tier: VerificationTier::LightClient, finality: FinalityConfig::probabilistic(15, 15) },
-        NetworkId::Polygon => Corridor { id, name: "Polygon", tier: VerificationTier::LightClient, finality: FinalityConfig::probabilistic(128, 128) },
-        NetworkId::Avalanche => Corridor { id, name: "Avalanche", tier: VerificationTier::LightClient, finality: FinalityConfig::deterministic(1) },
+        NetworkId::BnbChain => Corridor { id, name: "BNB Chain", tier: VerificationTier::Federated, finality: FinalityConfig::probabilistic(15, 15) },
+        NetworkId::Polygon => Corridor { id, name: "Polygon", tier: VerificationTier::Federated, finality: FinalityConfig::probabilistic(128, 128) },
+        NetworkId::Avalanche => Corridor { id, name: "Avalanche", tier: VerificationTier::Federated, finality: FinalityConfig::deterministic(1) },
         NetworkId::Arbitrum => Corridor { id, name: "Arbitrum", tier: VerificationTier::LightClient, finality: FinalityConfig::deterministic(64) },
         NetworkId::Optimism => Corridor { id, name: "Optimism", tier: VerificationTier::LightClient, finality: FinalityConfig::deterministic(64) },
         NetworkId::Base => Corridor { id, name: "Base", tier: VerificationTier::LightClient, finality: FinalityConfig::deterministic(64) },
@@ -137,6 +137,9 @@ mod tests {
     #[test]
     fn federated_networks_carry_the_federated_tier() {
         for id in [
+            NetworkId::BnbChain,
+            NetworkId::Polygon,
+            NetworkId::Avalanche,
             NetworkId::Solana,
             NetworkId::Tron,
             NetworkId::XrpLedger,
@@ -157,9 +160,6 @@ mod tests {
     fn light_client_networks_carry_the_light_client_tier() {
         for id in [
             NetworkId::Ethereum,
-            NetworkId::BnbChain,
-            NetworkId::Polygon,
-            NetworkId::Avalanche,
             NetworkId::Arbitrum,
             NetworkId::Optimism,
             NetworkId::Base,
@@ -179,6 +179,14 @@ mod tests {
             NetworkId::RobinhoodChain,
         ] {
             assert_eq!(corridor(id).tier, VerificationTier::LightClient);
+        }
+    }
+
+    #[test]
+    fn a_chain_that_runs_its_own_consensus_cannot_be_verified_by_the_ethereum_settled_engine() {
+        for id in [NetworkId::BnbChain, NetworkId::Polygon, NetworkId::Avalanche] {
+            assert_ne!(corridor(id).tier, VerificationTier::LightClient);
+            assert_eq!(corridor(id).tier, VerificationTier::Federated);
         }
     }
 }

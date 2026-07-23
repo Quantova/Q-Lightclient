@@ -5,6 +5,7 @@ pub mod params;
 pub mod retarget;
 pub mod sha256;
 pub mod spv;
+pub mod witness;
 pub mod work;
 
 pub use chain::{
@@ -15,6 +16,7 @@ pub use params::{network_params, Network, NetworkParams, BITCOIN, BITCOIN_CASH};
 pub use retarget::compute_retarget;
 pub use sha256::{double_sha256, sha256};
 pub use spv::{DepositProof, ProvenDeposit};
+pub use witness::{BitcoinCheckedFacts, ProveReadyWitness};
 pub use work::{block_work, U256};
 
 pub const HEADER_LEN: usize = 80;

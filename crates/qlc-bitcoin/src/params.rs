@@ -38,7 +38,7 @@ pub const BITCOIN_CASH: NetworkParams = NetworkParams {
     pow_limit_bits: 0x1d00ffff,
     target_timespan: 1_209_600,
     target_spacing: 600,
-    confirmation_depth: 10,
+    confirmation_depth: 15,
 };
 
 pub fn network_params(network: Network) -> NetworkParams {
@@ -47,6 +47,12 @@ pub fn network_params(network: Network) -> NetworkParams {
         Network::BitcoinCash => BITCOIN_CASH,
     }
 }
+
+pub const BITCOIN_CASH_DAA_NOTE: &str =
+    "bitcoin cash here retargets on the same legacy two week interval bitcoin used before november 2020 and does not model the real per block asert difficulty algorithm the live network adopted after that upgrade";
+
+pub const BITCOIN_CASH_CONFIRMATION_PENDING: &str =
+    "the bitcoin cash confirmation depth of fifteen follows the wider industry practice of asking for more confirmations than bitcoin given its far smaller and more volatile hash rate, a founder must confirm the final number before a bitcoin cash corridor is trusted live";
 
 #[cfg(test)]
 mod tests {
@@ -76,5 +82,21 @@ mod tests {
     fn network_lookup_returns_the_matching_parameters() {
         assert_eq!(network_params(Network::Bitcoin), BITCOIN);
         assert_eq!(network_params(Network::BitcoinCash), BITCOIN_CASH);
+    }
+
+    #[test]
+    fn bitcoin_cash_asks_for_more_confirmations_than_bitcoin() {
+        assert_eq!(BITCOIN_CASH.confirmation_depth, 15);
+        assert!(BITCOIN_CASH.confirmation_depth > BITCOIN.confirmation_depth);
+    }
+
+    #[test]
+    fn the_bitcoin_cash_daa_note_is_recorded() {
+        assert!(!BITCOIN_CASH_DAA_NOTE.is_empty());
+    }
+
+    #[test]
+    fn the_bitcoin_cash_confirmation_depth_awaits_founder_confirmation() {
+        assert!(!BITCOIN_CASH_CONFIRMATION_PENDING.is_empty());
     }
 }

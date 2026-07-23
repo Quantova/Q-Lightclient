@@ -1,7 +1,8 @@
 use crate::chain::{ConfirmedDeposit, VerifiedChain};
 use crate::params::NetworkParams;
-use crate::{double_sha256, MerkleStep, SpvError};
+use crate::{MerkleStep, SpvError};
 use qlc_stark::corridors::{bitcoin_spv, EventClaim, ProofStatement};
+use qlc_stark::shake256_256;
 use qlc_stark::StarkStatement;
 
 pub struct DepositProof<'a> {
@@ -35,7 +36,7 @@ impl<'a> DepositProof<'a> {
         buf.extend_from_slice(&confirmed.block_hash);
         buf.extend_from_slice(&confirmed.deposit_height.to_le_bytes());
         buf.extend_from_slice(&confirmed.merkle_root);
-        double_sha256(&buf)
+        shake256_256(&buf)
     }
 
     pub fn prove(&self) -> Result<ProvenDeposit, SpvError> {

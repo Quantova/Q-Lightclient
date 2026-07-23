@@ -35,6 +35,7 @@ const PI: [usize; 24] = [
 
 pub const RATE: usize = 136;
 const DOMAIN_SUFFIX: u8 = 0x06;
+const SHAKE_DOMAIN_SUFFIX: u8 = 0x1f;
 
 fn keccak_f(state: &mut [u64; 25]) {
     for rc in RC {
@@ -92,6 +93,28 @@ pub fn sha3_256(input: &[u8]) -> [u8; 32] {
     let rem = &input[i..];
     block[..rem.len()].copy_from_slice(rem);
     block[rem.len()] ^= DOMAIN_SUFFIX;
+    block[RATE - 1] ^= 0x80;
+    absorb_block(&mut state, &block);
+
+    let mut out = [0u8; 32];
+    for k in 0..4 {
+        out[k * 8..k * 8 + 8].copy_from_slice(&state[k].to_le_bytes());
+    }
+    out
+}
+
+pub fn shake256_256(input: &[u8]) -> [u8; 32] {
+    let mut state = [0u64; 25];
+    let mut i = 0;
+    while i + RATE <= input.len() {
+        absorb_block(&mut state, &input[i..i + RATE]);
+        i += RATE;
+    }
+
+    let mut block = [0u8; RATE];
+    let rem = &input[i..];
+    block[..rem.len()].copy_from_slice(rem);
+    block[rem.len()] ^= SHAKE_DOMAIN_SUFFIX;
     block[RATE - 1] ^= 0x80;
     absorb_block(&mut state, &block);
 
@@ -172,5 +195,26 @@ mod tests {
             keccak_variant[k * 8..k * 8 + 8].copy_from_slice(&state[k].to_le_bytes());
         }
         assert_ne!(sha3_256(input), keccak_variant);
+    }
+
+    #[test]
+    fn shake256_256_empty_matches_the_known_answer() {
+        assert_eq!(
+            to_hex(&shake256_256(b"")),
+            "46b9dd2b0ba88d13233b3feb743eeb243fcd52ea62b81b82b50c27646ed5762f"
+        );
+    }
+
+    #[test]
+    fn shake256_256_abc_matches_the_known_answer() {
+        assert_eq!(
+            to_hex(&shake256_256(b"abc")),
+            "483366601360a8771c6863080cc4114d8db44530f8f1e1ee4f94ea37e78b5739"
+        );
+    }
+
+    #[test]
+    fn shake256_256_is_distinct_from_sha3_256() {
+        assert_ne!(shake256_256(b"quantova"), sha3_256(b"quantova"));
     }
 }
