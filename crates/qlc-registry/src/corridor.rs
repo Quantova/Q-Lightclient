@@ -47,6 +47,11 @@ pub fn corridor(id: NetworkId) -> Corridor {
         NetworkId::Ton => Corridor { id, name: "Ton", tier: VerificationTier::Federated, finality: FinalityConfig::deterministic(1) },
         NetworkId::Stellar => Corridor { id, name: "Stellar", tier: VerificationTier::Federated, finality: FinalityConfig::deterministic(1) },
         NetworkId::RobinhoodChain => Corridor { id, name: "Robinhood Chain", tier: VerificationTier::LightClient, finality: FinalityConfig::deterministic(64) },
+        NetworkId::Monero => Corridor { id, name: "Monero", tier: VerificationTier::Federated, finality: FinalityConfig::probabilistic(10, 10) },
+        NetworkId::Litecoin => Corridor { id, name: "Litecoin", tier: VerificationTier::Federated, finality: FinalityConfig::probabilistic(12, 12) },
+        NetworkId::Dogecoin => Corridor { id, name: "Dogecoin", tier: VerificationTier::Federated, finality: FinalityConfig::probabilistic(30, 30) },
+        NetworkId::Zcash => Corridor { id, name: "Zcash", tier: VerificationTier::Federated, finality: FinalityConfig::probabilistic(24, 24) },
+        NetworkId::Cctp => Corridor { id, name: "Circle CCTP", tier: VerificationTier::Federated, finality: FinalityConfig::probabilistic(20, 20) },
     }
 }
 
@@ -92,7 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn the_full_set_of_thirty_four_corridors_is_present() {
+    fn the_full_set_of_thirty_nine_corridors_is_present() {
         let corridors: Vec<Corridor> = all_network_ids().iter().map(|id| corridor(*id)).collect();
         assert_eq!(corridors.len(), NETWORK_COUNT as usize);
     }
@@ -151,6 +156,11 @@ mod tests {
             NetworkId::Algorand,
             NetworkId::Ton,
             NetworkId::Stellar,
+            NetworkId::Monero,
+            NetworkId::Litecoin,
+            NetworkId::Dogecoin,
+            NetworkId::Zcash,
+            NetworkId::Cctp,
         ] {
             assert_eq!(corridor(id).tier, VerificationTier::Federated);
         }
