@@ -1,3 +1,6 @@
+// Copyright 2026 Quantova Inc
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
 use qlc_core::{ratchet, TierError, VerificationTier};
 
 use crate::finality::FinalityConfig;
