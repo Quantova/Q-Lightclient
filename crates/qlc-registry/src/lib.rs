@@ -63,6 +63,11 @@ pub fn seed_assets() -> Vec<Asset> {
         Asset { origin_chain: 8, symbol: "VIRTUAL", tag: "qVIRTUAL.base" },
         Asset { origin_chain: 8, symbol: "wstETH", tag: "qwstETH.base" },
         Asset { origin_chain: 16, symbol: "ATOM", tag: "qATOM.atom" },
+        Asset { origin_chain: 34, symbol: "XMR", tag: "qXMR.xmr" },
+        Asset { origin_chain: 35, symbol: "LTC", tag: "qLTC.ltc" },
+        Asset { origin_chain: 36, symbol: "DOGE", tag: "qDOGE.doge" },
+        Asset { origin_chain: 37, symbol: "ZEC", tag: "qZEC.zec" },
+        Asset { origin_chain: 38, symbol: "USDC", tag: "qUSDC.cctp" },
     ]
 }
 
