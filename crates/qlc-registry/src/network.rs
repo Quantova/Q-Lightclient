@@ -35,9 +35,14 @@ pub enum NetworkId {
     Ton = 31,
     Stellar = 32,
     RobinhoodChain = 33,
+    Monero = 34,
+    Litecoin = 35,
+    Dogecoin = 36,
+    Zcash = 37,
+    Cctp = 38,
 }
 
-pub const NETWORK_COUNT: u32 = 34;
+pub const NETWORK_COUNT: u32 = 39;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnknownNetworkId(pub u32);
@@ -81,6 +86,11 @@ impl TryFrom<u32> for NetworkId {
             31 => Ok(NetworkId::Ton),
             32 => Ok(NetworkId::Stellar),
             33 => Ok(NetworkId::RobinhoodChain),
+            34 => Ok(NetworkId::Monero),
+            35 => Ok(NetworkId::Litecoin),
+            36 => Ok(NetworkId::Dogecoin),
+            37 => Ok(NetworkId::Zcash),
+            38 => Ok(NetworkId::Cctp),
             other => Err(UnknownNetworkId(other)),
         }
     }
@@ -128,6 +138,11 @@ pub fn all_network_ids() -> [NetworkId; NETWORK_COUNT as usize] {
         NetworkId::Ton,
         NetworkId::Stellar,
         NetworkId::RobinhoodChain,
+        NetworkId::Monero,
+        NetworkId::Litecoin,
+        NetworkId::Dogecoin,
+        NetworkId::Zcash,
+        NetworkId::Cctp,
     ]
 }
 
@@ -137,7 +152,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     #[test]
-    fn every_id_from_zero_to_thirty_three_decodes() {
+    fn every_id_from_zero_to_thirty_eight_decodes() {
         for raw in 0..NETWORK_COUNT {
             assert!(
                 NetworkId::try_from(raw).is_ok(),
