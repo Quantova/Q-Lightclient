@@ -5,6 +5,7 @@
 
 pub mod chain;
 pub mod params;
+pub mod tx;
 pub mod retarget;
 pub mod sha256;
 pub mod spv;
@@ -45,6 +46,7 @@ pub enum SpvError {
     RetargetMismatch { index: usize },
     HeightOutOfRange,
     InsufficientConfirmations { have: u32, need: u32 },
+    MalformedTransaction,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
