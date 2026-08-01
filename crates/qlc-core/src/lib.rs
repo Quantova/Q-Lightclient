@@ -86,7 +86,11 @@ impl FollowState {
         next_prev: [u8; 32],
         next_digest: [u8; 32],
     ) -> Result<(), ForeignError> {
-        if next_height != self.trusted_height + 1 {
+        let expected_height = match self.trusted_height.checked_add(1) {
+            Some(h) => h,
+            None => return Err(ForeignError::Malformed),
+        };
+        if next_height != expected_height {
             return Err(ForeignError::Malformed);
         }
         if next_prev != self.trusted_digest {
@@ -130,5 +134,13 @@ mod tests {
         assert!(s.advance(101, [1u8; 32], [2u8; 32]).is_ok());
         assert_eq!(s.trusted_height, 101);
         assert_eq!(s.trusted_digest, [2u8; 32]);
+    }
+
+    #[test]
+    fn follow_state_at_the_max_height_refuses_without_overflow() {
+        let mut s = FollowState::genesis(u64::MAX, [1u8; 32]);
+        assert_eq!(s.advance(0, [1u8; 32], [2u8; 32]), Err(ForeignError::Malformed));
+        assert_eq!(s.trusted_height, u64::MAX, "a rejected advance leaves the height untouched");
+        assert_eq!(s.trusted_digest, [1u8; 32]);
     }
 }
