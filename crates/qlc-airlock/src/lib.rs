@@ -13,7 +13,7 @@ pub const SUITE_ML_DSA: u8 = 0x01;
 pub const SUITE_HASH_STARK: u8 = 0x02;
 
 pub const ML_DSA_65_SIG_LEN: usize = 3309;
-pub const STARK_STATEMENT_LEN: usize = 37;
+pub const STARK_STATEMENT_LEN: usize = StarkStatement::ENCODED_LEN;
 pub const MIN_HASH_STARK_LEN: usize = STARK_STATEMENT_LEN + 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,7 +144,7 @@ mod tests {
     }
 
     fn proof_statement() -> StarkStatement {
-        StarkStatement { corridor_id: 0, kind: StatementKind::BitcoinSpv, public_input_digest: [0x5au8; 32] }
+        StarkStatement { corridor_id: 0, dest_chain_id: 4801, nonce: 990_001, kind: StatementKind::BitcoinSpv, public_input_digest: [0x5au8; 32] }
     }
 
     fn ed25519_signature() -> Vec<u8> {
@@ -211,7 +211,7 @@ mod tests {
             StatementKind::EvmLightClient,
             StatementKind::CosmosTendermint,
         ] {
-            let statement = StarkStatement { corridor_id: 1, kind, public_input_digest: [9u8; 32] };
+            let statement = StarkStatement { corridor_id: 1, dest_chain_id: 4801, nonce: 990_001, kind, public_input_digest: [9u8; 32] };
             let bytes = encode_ingress(&ml_dsa_attestation(), &statement, &[0x02u8; 8]);
             assert_eq!(parse_ingress(&bytes).unwrap().proof.statement.kind, kind);
         }
@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn a_generic_non_proof_statement_does_not_cross() {
-        let statement = StarkStatement { corridor_id: 1, kind: StatementKind::LightClientStep, public_input_digest: [9u8; 32] };
+        let statement = StarkStatement { corridor_id: 1, dest_chain_id: 4801, nonce: 990_001, kind: StatementKind::LightClientStep, public_input_digest: [9u8; 32] };
         let bytes = encode_ingress(&ml_dsa_attestation(), &statement, &[0x02u8; 8]);
         assert_eq!(parse_ingress(&bytes), Err(IngressError::NotProofCorridor));
     }
