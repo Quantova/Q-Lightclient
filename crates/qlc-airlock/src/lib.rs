@@ -4,7 +4,7 @@
 
 
 use qlc_stark::corridors::is_proof_corridor;
-use qlc_stark::StarkStatement;
+use qlc_stark::{StarkStatement, QUANTOVA_DEST_CHAIN_ID};
 
 pub const MAGIC: [u8; 4] = *b"QALK";
 pub const VERSION: u8 = 1;
@@ -28,6 +28,7 @@ pub enum IngressError {
     TrailingBytes,
     BadStatement,
     NotProofCorridor,
+    WrongDestination { expected: u32, found: u32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,6 +104,12 @@ pub fn parse_ingress(bytes: &[u8]) -> Result<Ingress, IngressError> {
     }
 
     let statement = StarkStatement::decode(&payload1[0..STARK_STATEMENT_LEN]).ok_or(IngressError::BadStatement)?;
+    if statement.dest_chain_id != QUANTOVA_DEST_CHAIN_ID {
+        return Err(IngressError::WrongDestination {
+            expected: QUANTOVA_DEST_CHAIN_ID,
+            found: statement.dest_chain_id,
+        });
+    }
     if !is_proof_corridor(statement.kind) {
         return Err(IngressError::NotProofCorridor);
     }
@@ -222,6 +229,16 @@ mod tests {
         let statement = StarkStatement { corridor_id: 1, dest_chain_id: 4801, nonce: 990_001, kind: StatementKind::LightClientStep, public_input_digest: [9u8; 32] };
         let bytes = encode_ingress(&ml_dsa_attestation(), &statement, &[0x02u8; 8]);
         assert_eq!(parse_ingress(&bytes), Err(IngressError::NotProofCorridor));
+    }
+
+    #[test]
+    fn a_statement_addressed_to_another_chain_does_not_cross() {
+        let statement = StarkStatement { corridor_id: 0, dest_chain_id: 4802, nonce: 990_001, kind: StatementKind::BitcoinSpv, public_input_digest: [0x5au8; 32] };
+        let bytes = encode_ingress(&ml_dsa_attestation(), &statement, &[0x02u8; 8]);
+        assert_eq!(
+            parse_ingress(&bytes),
+            Err(IngressError::WrongDestination { expected: QUANTOVA_DEST_CHAIN_ID, found: 4802 })
+        );
     }
 
     #[test]
