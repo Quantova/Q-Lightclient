@@ -17,6 +17,9 @@ pub const SUITE_HASH_STARK: u8 = 0x02;
 pub const ML_DSA_65_SIG_LEN: usize = 3309;
 pub const STARK_STATEMENT_LEN: usize = StarkStatement::ENCODED_LEN;
 pub const MIN_HASH_STARK_LEN: usize = STARK_STATEMENT_LEN + 1;
+// An upper bound on any single artifact slot, well above the largest legitimate certificate, so a
+// crafted length prefix cannot make parse_ingress copy an arbitrarily large body into memory.
+pub const MAX_HASH_STARK_LEN: usize = 1 << 20;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IngressError {
@@ -65,6 +68,9 @@ fn read_slot(bytes: &[u8], off: usize, slot: usize) -> Result<(u8, &[u8], usize)
         return Err(IngressError::UnknownSuite { slot, suite });
     }
     let len = u32::from_le_bytes([bytes[off + 1], bytes[off + 2], bytes[off + 3], bytes[off + 4]]) as usize;
+    if len > MAX_HASH_STARK_LEN {
+        return Err(IngressError::BadArtifactLength { slot });
+    }
     let start = off + 5;
     let end = match start.checked_add(len) {
         Some(e) => e,
@@ -228,6 +234,13 @@ mod tests {
         assert_eq!(ingress.attestation.signature.len(), ML_DSA_65_SIG_LEN);
         assert!(is_proof_corridor(ingress.proof.statement.kind));
         assert_eq!(ingress.proof.proof, vec![0x01u8; 200]);
+    }
+
+    #[test]
+    fn an_oversized_proof_slot_is_refused() {
+        let huge = vec![0u8; MAX_HASH_STARK_LEN + 1];
+        let bytes = encode_ingress(&ml_dsa_attestation(), &proof_statement(), &huge);
+        assert_eq!(parse_ingress(&bytes), Err(IngressError::BadArtifactLength { slot: 1 }));
     }
 
     #[test]
