@@ -17,8 +17,6 @@ pub const SUITE_HASH_STARK: u8 = 0x02;
 pub const ML_DSA_65_SIG_LEN: usize = 3309;
 pub const STARK_STATEMENT_LEN: usize = StarkStatement::ENCODED_LEN;
 pub const MIN_HASH_STARK_LEN: usize = STARK_STATEMENT_LEN + 1;
-// An upper bound on any single artifact slot, well above the largest legitimate certificate, so a
-// crafted length prefix cannot make parse_ingress copy an arbitrarily large body into memory.
 pub const MAX_HASH_STARK_LEN: usize = 1 << 20;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
