@@ -11,6 +11,18 @@ pub enum VerificationTier {
     Native,
 }
 
+impl VerificationTier {
+    // an explicit trust rank so the one-way ratchet never depends on enum declaration order
+    fn rank(self) -> u8 {
+        match self {
+            VerificationTier::Federated => 0,
+            VerificationTier::Spv => 1,
+            VerificationTier::LightClient => 2,
+            VerificationTier::Native => 3,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrustGrade {
     Relayer,
@@ -24,7 +36,7 @@ pub enum TierError {
 }
 
 pub fn ratchet(current: VerificationTier, proposed: VerificationTier) -> Result<VerificationTier, TierError> {
-    if proposed >= current {
+    if proposed.rank() >= current.rank() {
         Ok(proposed)
     } else {
         Err(TierError::Downgrade {
@@ -105,6 +117,13 @@ impl FollowState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_tier_rank_pins_the_trust_order_so_a_reorder_cannot_silently_invert_the_ratchet() {
+        assert!(VerificationTier::Federated.rank() < VerificationTier::Spv.rank());
+        assert!(VerificationTier::Spv.rank() < VerificationTier::LightClient.rank());
+        assert!(VerificationTier::LightClient.rank() < VerificationTier::Native.rank());
+    }
 
     #[test]
     fn tier_ratchet_upgrades_but_never_downgrades() {
