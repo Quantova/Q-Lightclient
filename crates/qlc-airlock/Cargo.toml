@@ -11,3 +11,5 @@ description = "The Airlock ingress grammar. It parses exactly the two post quant
 
 [dependencies]
 qlc-stark = { path = "../qlc-stark" }
+qlc-registry = { path = "../qlc-registry" }
+qlc-core = { path = "../qlc-core" }

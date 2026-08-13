@@ -3,8 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 
+use qlc_core::VerificationTier;
+use qlc_registry::corridor_for_id;
 use qlc_stark::corridors::is_proof_corridor;
-use qlc_stark::{StarkStatement, QUANTOVA_DEST_CHAIN_ID};
+use qlc_stark::{StarkStatement, StatementKind, QUANTOVA_DEST_CHAIN_ID};
 
 pub const MAGIC: [u8; 4] = *b"QALK";
 pub const VERSION: u8 = 1;
@@ -29,6 +31,8 @@ pub enum IngressError {
     BadStatement,
     NotProofCorridor,
     WrongDestination { expected: u32, found: u32 },
+    UnknownCorridor { corridor_id: u32 },
+    CorridorKindMismatch { corridor_id: u32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,6 +116,19 @@ pub fn parse_ingress(bytes: &[u8]) -> Result<Ingress, IngressError> {
     }
     if !is_proof_corridor(statement.kind) {
         return Err(IngressError::NotProofCorridor);
+    }
+    // The corridor id must name a registered corridor whose verification tier matches the proof kind,
+    // so a proof cannot be presented under an unregistered id or a federated corridor it was not built
+    // for. The consumer that routes on corridor_id still owns the finer within-tier chain identity.
+    let corridor = corridor_for_id(statement.corridor_id)
+        .map_err(|_| IngressError::UnknownCorridor { corridor_id: statement.corridor_id })?;
+    let expected_tier = match statement.kind {
+        StatementKind::BitcoinSpv => VerificationTier::Spv,
+        StatementKind::EvmLightClient | StatementKind::CosmosTendermint => VerificationTier::LightClient,
+        _ => return Err(IngressError::NotProofCorridor),
+    };
+    if corridor.tier != expected_tier {
+        return Err(IngressError::CorridorKindMismatch { corridor_id: statement.corridor_id });
     }
 
     Ok(Ingress {
@@ -213,15 +230,30 @@ mod tests {
 
     #[test]
     fn every_proof_corridor_statement_crosses_the_airlock() {
-        for kind in [
-            StatementKind::BitcoinSpv,
-            StatementKind::EvmLightClient,
-            StatementKind::CosmosTendermint,
+        // Each kind is presented under a corridor whose tier matches: Bitcoin (Spv), Ethereum and
+        // Cosmos Hub (LightClient). A mismatched or unregistered corridor id is rejected below.
+        for (kind, corridor_id) in [
+            (StatementKind::BitcoinSpv, 0u32),
+            (StatementKind::EvmLightClient, 2u32),
+            (StatementKind::CosmosTendermint, 16u32),
         ] {
-            let statement = StarkStatement { corridor_id: 1, dest_chain_id: 4801, nonce: 990_001, kind, public_input_digest: [9u8; 32] };
+            let statement = StarkStatement { corridor_id, dest_chain_id: 4801, nonce: 990_001, kind, public_input_digest: [9u8; 32] };
             let bytes = encode_ingress(&ml_dsa_attestation(), &statement, &[0x02u8; 8]);
             assert_eq!(parse_ingress(&bytes).unwrap().proof.statement.kind, kind);
         }
+    }
+
+    #[test]
+    fn a_proof_under_a_mismatched_or_unknown_corridor_is_rejected() {
+        // A Bitcoin SPV proof presented under a federated corridor (Circle CCTP, id 38).
+        let mismatched = StarkStatement { corridor_id: 38, dest_chain_id: 4801, nonce: 990_001, kind: StatementKind::BitcoinSpv, public_input_digest: [9u8; 32] };
+        let bytes = encode_ingress(&ml_dsa_attestation(), &mismatched, &[0x02u8; 8]);
+        assert_eq!(parse_ingress(&bytes), Err(IngressError::CorridorKindMismatch { corridor_id: 38 }));
+
+        // An unregistered corridor id past the registry.
+        let unknown = StarkStatement { corridor_id: 4_000_000_000, dest_chain_id: 4801, nonce: 990_001, kind: StatementKind::EvmLightClient, public_input_digest: [9u8; 32] };
+        let bytes = encode_ingress(&ml_dsa_attestation(), &unknown, &[0x02u8; 8]);
+        assert_eq!(parse_ingress(&bytes), Err(IngressError::UnknownCorridor { corridor_id: 4_000_000_000 }));
     }
 
     #[test]
