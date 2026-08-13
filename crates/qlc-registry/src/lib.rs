@@ -9,7 +9,7 @@ pub mod network;
 
 pub use corridor::{corridor, corridor_for_id, upgrade_tier, Corridor, RegistryError};
 pub use finality::{FinalityConfig, FinalityKind};
-pub use network::{all_network_ids, NetworkId, UnknownNetworkId, NETWORK_COUNT};
+pub use network::{all_network_ids, ChainFamily, NetworkId, UnknownNetworkId, NETWORK_COUNT};
 
 pub const FOUNDER_CONFIRMATION_PENDING: &str =
     "the network enumeration, its tiers, and its finality parameters await founder confirmation against the old v2 Network enum";

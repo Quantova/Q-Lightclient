@@ -4,7 +4,7 @@
 
 
 use qlc_core::VerificationTier;
-use qlc_registry::corridor_for_id;
+use qlc_registry::{corridor_for_id, ChainFamily};
 use qlc_stark::corridors::is_proof_corridor;
 use qlc_stark::{StarkStatement, StatementKind, QUANTOVA_DEST_CHAIN_ID};
 
@@ -117,17 +117,19 @@ pub fn parse_ingress(bytes: &[u8]) -> Result<Ingress, IngressError> {
     if !is_proof_corridor(statement.kind) {
         return Err(IngressError::NotProofCorridor);
     }
-    // The corridor id must name a registered corridor whose verification tier matches the proof kind,
-    // so a proof cannot be presented under an unregistered id or a federated corridor it was not built
-    // for. The consumer that routes on corridor_id still owns the finer within-tier chain identity.
+    // The corridor id must name a registered corridor whose verification tier AND chain family match
+    // the proof kind, so a proof cannot be presented under an unregistered id, a federated corridor it
+    // was not built for, or a same-tier corridor of the wrong family (an EVM proof under a Cosmos
+    // corridor). Both share the LightClient tier, so the family check is what separates them.
     let corridor = corridor_for_id(statement.corridor_id)
         .map_err(|_| IngressError::UnknownCorridor { corridor_id: statement.corridor_id })?;
-    let expected_tier = match statement.kind {
-        StatementKind::BitcoinSpv => VerificationTier::Spv,
-        StatementKind::EvmLightClient | StatementKind::CosmosTendermint => VerificationTier::LightClient,
+    let (expected_tier, expected_family) = match statement.kind {
+        StatementKind::BitcoinSpv => (VerificationTier::Spv, ChainFamily::Bitcoin),
+        StatementKind::EvmLightClient => (VerificationTier::LightClient, ChainFamily::Evm),
+        StatementKind::CosmosTendermint => (VerificationTier::LightClient, ChainFamily::Cosmos),
         _ => return Err(IngressError::NotProofCorridor),
     };
-    if corridor.tier != expected_tier {
+    if corridor.tier != expected_tier || corridor.id.family() != expected_family {
         return Err(IngressError::CorridorKindMismatch { corridor_id: statement.corridor_id });
     }
 
@@ -254,6 +256,12 @@ mod tests {
         let unknown = StarkStatement { corridor_id: 4_000_000_000, dest_chain_id: 4801, nonce: 990_001, kind: StatementKind::EvmLightClient, public_input_digest: [9u8; 32] };
         let bytes = encode_ingress(&ml_dsa_attestation(), &unknown, &[0x02u8; 8]);
         assert_eq!(parse_ingress(&bytes), Err(IngressError::UnknownCorridor { corridor_id: 4_000_000_000 }));
+
+        // An EVM light-client proof presented under a Cosmos corridor (Cosmos Hub, id 16): both are the
+        // LightClient tier, so only the family check rejects the cross-family crossing.
+        let cross = StarkStatement { corridor_id: 16, dest_chain_id: 4801, nonce: 990_001, kind: StatementKind::EvmLightClient, public_input_digest: [9u8; 32] };
+        let bytes = encode_ingress(&ml_dsa_attestation(), &cross, &[0x02u8; 8]);
+        assert_eq!(parse_ingress(&bytes), Err(IngressError::CorridorKindMismatch { corridor_id: 16 }));
     }
 
     #[test]

@@ -47,6 +47,31 @@ pub enum NetworkId {
 
 pub const NETWORK_COUNT: u32 = 39;
 
+/// The consensus/proof family a network belongs to. The airlock requires a proof of a given kind to be
+/// presented under a corridor of the matching family, so an EVM light-client proof cannot cross under a
+/// Cosmos corridor that merely shares the same verification tier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChainFamily {
+    Bitcoin,
+    Evm,
+    Cosmos,
+    Other,
+}
+
+impl NetworkId {
+    pub fn family(self) -> ChainFamily {
+        use NetworkId::*;
+        match self {
+            Bitcoin | BitcoinCash | Litecoin | Dogecoin | Zcash | Monero => ChainFamily::Bitcoin,
+            Ethereum | BnbChain | Polygon | Avalanche | Arbitrum | Optimism | Base | Fantom
+            | Gnosis | Linea | Scroll | ZkSyncEra | Mantle | Celo | RobinhoodChain => ChainFamily::Evm,
+            CosmosHub | Osmosis | Celestia | Injective | Sei | Kava => ChainFamily::Cosmos,
+            Solana | Tron | XrpLedger | Cardano | Near | Sui | Aptos | Hedera | Algorand | Ton
+            | Stellar | Cctp => ChainFamily::Other,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnknownNetworkId(pub u32);
 
