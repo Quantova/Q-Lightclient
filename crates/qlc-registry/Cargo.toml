@@ -10,4 +10,4 @@ rust-version.workspace = true
 description = "The corridor and asset registry. It carries the 37 origin chains and their origin-tagged assets toward the 70 target. Every network resolves a verification tier and a required finality config with confirmation depth, deterministic or probabilistic kind, and reorg depth. Registry growth is by standards proposal only."
 
 [dependencies]
-qlc-core = { path = "../qlc-core" }
+qlc-core = { path = "../qlc-core", version = "0.1.0" }
