@@ -26,7 +26,10 @@ impl EventClaim {
         out.extend_from_slice(&self.recipient);
     }
 
-    fn decode_from(bytes: &[u8]) -> EventClaim {
+    fn decode_from(bytes: &[u8]) -> Option<EventClaim> {
+        if bytes.len() != Self::ENCODED_LEN {
+            return None;
+        }
         let mut source_ref = [0u8; SOURCE_REF_LEN];
         source_ref.copy_from_slice(&bytes[0..32]);
         let mut asset_id = [0u8; ASSET_ID_LEN];
@@ -35,12 +38,12 @@ impl EventClaim {
         amount_bytes.copy_from_slice(&bytes[48..64]);
         let mut recipient = [0u8; RECIPIENT_LEN];
         recipient.copy_from_slice(&bytes[64..96]);
-        EventClaim {
+        Some(EventClaim {
             source_ref,
             asset_id,
             amount: u128::from_le_bytes(amount_bytes),
             recipient,
-        }
+        })
     }
 }
 
@@ -94,7 +97,7 @@ impl ProofStatement {
         }
         let mut anchor = [0u8; ANCHOR_LEN];
         anchor.copy_from_slice(&bytes[17..49]);
-        let event = EventClaim::decode_from(&bytes[49..145]);
+        let event = EventClaim::decode_from(&bytes[49..145])?;
         let finality_depth = u32::from_le_bytes([bytes[145], bytes[146], bytes[147], bytes[148]]);
         Some(ProofStatement {
             corridor_id,
