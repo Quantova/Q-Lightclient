@@ -10,11 +10,18 @@ A light client is the smallest amount of code that can decide, on its own, wheth
 
 In the Quantova stack this client is the verification core embedded by the wallet, by the QCore SDK, and by the validator application. It lets each of them read the chain and act on the result without trusting a gateway to tell the truth.
 
-What it verifies, all with post quantum primitives only.
+Status. This repository defines the verification interfaces and the corridor and
+finality registry. The concrete post quantum verifiers are not implemented here yet, and
+the crate is not wired into the wallet, the SDK, or the validator application. The live
+verification the chain relies on today is in the Quantova-Chain crates qlc-ethereum,
+qlc-cosmos and qtv-btc-spv, not in this repository. Do not treat this crate as a source
+of verification until the traits below carry audited implementations.
 
-- Header attestations. Consensus signs with the module lattice scheme and nothing else, so a header whose attestation is any other scheme is refused. This matches the consensus rule frozen in the conformance vectors.
-- Inclusion and state proofs. Membership under a header is checked with SHA-3 Merkle proofs, the same hashing the chain commits with.
-- Certificate proofs. Batch and tally certificates arrive as hash based STARK proofs from the prover, which rest on hashing alone with no pairing and no elliptic curve operation. The light client carries the verifier side of that certificate.
+The interfaces it defines, all intended for post quantum primitives only.
+
+- Header attestations. The interface for refusing a header whose attestation is any scheme other than the module lattice scheme consensus signs with.
+- Inclusion and state proofs. The interface for checking membership under a header with SHA-3 Merkle proofs, the same hashing the chain commits with.
+- Certificate proofs. The interface for the verifier side of the hash based STARK batch and tally certificates the prover emits.
 - Identifiers. Addresses and object identifiers are the Quantova Q1 and family formats, so a value in any foreign encoding does not parse.
 
 ## Cryptography
