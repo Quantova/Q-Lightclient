@@ -70,10 +70,6 @@ pub struct Ingress {
     pub proof: HashStark,
 }
 
-pub trait AttestationVerifier {
-    fn verify(&self, message: &[u8], attestation: &MlDsaAttestation) -> bool;
-}
-
 fn read_slot(bytes: &[u8], off: usize, slot: usize) -> Result<(u8, &[u8], usize), IngressError> {
     if off + 5 > bytes.len() {
         return Err(IngressError::Truncated { slot });
