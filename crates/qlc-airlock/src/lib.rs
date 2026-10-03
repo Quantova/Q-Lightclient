@@ -622,9 +622,9 @@ mod same_family_boundary_tests {
         };
         let bytes = encode_ingress(&ml_dsa_attestation(), &arbitrum, &[0x02u8; 8]);
         assert!(
-            parse_ingress(&bytes).is_ok(),
-            "the same proof kind also crosses under another EVM LightClient corridor, so the \
-             airlock is not what keeps the two apart"
+            parse_ingress(&bytes).is_err(),
+            "corridor six no longer carries a light-client verifier, so an EVM light-client \
+             statement no longer crosses under it"
         );
     }
 }
