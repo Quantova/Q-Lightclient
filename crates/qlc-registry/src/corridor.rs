@@ -44,7 +44,7 @@ pub fn corridor(id: NetworkId) -> Corridor {
             id,
             name: "Polygon",
             tier: VerificationTier::Federated,
-            finality: FinalityConfig::probabilistic(128, 128),
+            finality: FinalityConfig::probabilistic(256, 256),
         },
         NetworkId::Avalanche => Corridor {
             id,
@@ -55,19 +55,19 @@ pub fn corridor(id: NetworkId) -> Corridor {
         NetworkId::Arbitrum => Corridor {
             id,
             name: "Arbitrum",
-            tier: VerificationTier::LightClient,
+            tier: VerificationTier::Federated,
             finality: FinalityConfig::deterministic(64),
         },
         NetworkId::Optimism => Corridor {
             id,
             name: "Optimism",
-            tier: VerificationTier::LightClient,
+            tier: VerificationTier::Federated,
             finality: FinalityConfig::deterministic(64),
         },
         NetworkId::Base => Corridor {
             id,
             name: "Base",
-            tier: VerificationTier::LightClient,
+            tier: VerificationTier::Federated,
             finality: FinalityConfig::deterministic(64),
         },
         NetworkId::Fantom => Corridor {
@@ -145,7 +145,7 @@ pub fn corridor(id: NetworkId) -> Corridor {
         NetworkId::Kava => Corridor {
             id,
             name: "Kava",
-            tier: VerificationTier::LightClient,
+            tier: VerificationTier::Federated,
             finality: FinalityConfig::deterministic(1),
         },
         NetworkId::Solana => Corridor {
@@ -170,7 +170,7 @@ pub fn corridor(id: NetworkId) -> Corridor {
             id,
             name: "Cardano",
             tier: VerificationTier::Federated,
-            finality: FinalityConfig::probabilistic(15, 15),
+            finality: FinalityConfig::probabilistic(2160, 2160),
         },
         NetworkId::Near => Corridor {
             id,
@@ -217,7 +217,7 @@ pub fn corridor(id: NetworkId) -> Corridor {
         NetworkId::RobinhoodChain => Corridor {
             id,
             name: "Robinhood Chain",
-            tier: VerificationTier::LightClient,
+            tier: VerificationTier::Federated,
             finality: FinalityConfig::deterministic(64),
         },
         NetworkId::Monero => Corridor {
@@ -399,18 +399,22 @@ mod tests {
     fn light_client_networks_carry_the_light_client_tier() {
         for id in [
             NetworkId::Ethereum,
-            NetworkId::Arbitrum,
-            NetworkId::Optimism,
-            NetworkId::Base,
             NetworkId::CosmosHub,
             NetworkId::Osmosis,
             NetworkId::Celestia,
             NetworkId::Injective,
             NetworkId::Sei,
+        ] {
+            assert_eq!(corridor(id).tier, VerificationTier::LightClient);
+        }
+        for id in [
+            NetworkId::Arbitrum,
+            NetworkId::Optimism,
+            NetworkId::Base,
             NetworkId::Kava,
             NetworkId::RobinhoodChain,
         ] {
-            assert_eq!(corridor(id).tier, VerificationTier::LightClient);
+            assert_eq!(corridor(id).tier, VerificationTier::Federated);
         }
     }
 
