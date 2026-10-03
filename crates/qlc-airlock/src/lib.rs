@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 use qlc_core::VerificationTier;
-use qlc_registry::{corridor_for_id, ChainFamily};
+use qlc_registry::{corridor_for_id, NetworkId};
 use qlc_stark::corridors::is_proof_corridor;
 use qlc_stark::{StarkStatement, StatementKind, QUANTOVA_DEST_CHAIN_ID};
 
@@ -152,13 +152,13 @@ pub fn parse_ingress(bytes: &[u8]) -> Result<Ingress, IngressError> {
         corridor_for_id(statement.corridor_id).map_err(|_| IngressError::UnknownCorridor {
             corridor_id: statement.corridor_id,
         })?;
-    let (expected_tier, expected_family) = match statement.kind {
-        StatementKind::BitcoinSpv => (VerificationTier::Spv, ChainFamily::Bitcoin),
-        StatementKind::EvmLightClient => (VerificationTier::LightClient, ChainFamily::Evm),
-        StatementKind::CosmosTendermint => (VerificationTier::LightClient, ChainFamily::Cosmos),
+    let expected_tier = match statement.kind {
+        StatementKind::BitcoinSpv => VerificationTier::Spv,
+        StatementKind::EvmLightClient => VerificationTier::LightClient,
+        StatementKind::CosmosTendermint => VerificationTier::LightClient,
         _ => return Err(IngressError::NotProofCorridor),
     };
-    if corridor.tier != expected_tier || corridor.id.family() != expected_family {
+    if corridor.tier != expected_tier || !kind_allows_corridor(statement.kind, corridor.id) {
         return Err(IngressError::CorridorKindMismatch {
             corridor_id: statement.corridor_id,
         });
@@ -173,6 +173,18 @@ pub fn parse_ingress(bytes: &[u8]) -> Result<Ingress, IngressError> {
             proof: payload1[STARK_STATEMENT_LEN..].to_vec(),
         },
     })
+}
+
+fn kind_allows_corridor(kind: StatementKind, id: NetworkId) -> bool {
+    use NetworkId::*;
+    match kind {
+        StatementKind::BitcoinSpv => matches!(id, Bitcoin | BitcoinCash),
+        StatementKind::EvmLightClient => matches!(id, Ethereum),
+        StatementKind::CosmosTendermint => {
+            matches!(id, CosmosHub | Osmosis | Celestia | Injective | Sei)
+        }
+        _ => false,
+    }
 }
 
 fn push_slot(out: &mut Vec<u8>, suite: u8, payload: &[u8]) {

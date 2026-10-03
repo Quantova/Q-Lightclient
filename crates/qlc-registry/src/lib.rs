@@ -6,7 +6,7 @@ pub mod corridor;
 pub mod finality;
 pub mod network;
 
-pub use corridor::{corridor, corridor_for_id, upgrade_tier, Corridor, RegistryError};
+pub use corridor::{corridor, corridor_for_id, upgrade_tier, Corridor, RegistryError, TierLedger};
 pub use finality::{FinalityConfig, FinalityKind};
 pub use network::{all_network_ids, ChainFamily, NetworkId, UnknownNetworkId, NETWORK_COUNT};
 

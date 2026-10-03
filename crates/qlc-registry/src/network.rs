@@ -64,14 +64,16 @@ impl NetworkId {
     pub fn family(self) -> ChainFamily {
         use NetworkId::*;
         match self {
-            Bitcoin | BitcoinCash | Litecoin | Dogecoin | Zcash | Monero => ChainFamily::Bitcoin,
+            Bitcoin | BitcoinCash | Litecoin | Dogecoin => ChainFamily::Bitcoin,
             Ethereum | BnbChain | Polygon | Avalanche | Arbitrum | Optimism | Base | Fantom
             | Gnosis | Linea | Scroll | ZkSyncEra | Mantle | Celo | RobinhoodChain | Cronos => {
                 ChainFamily::Evm
             }
             CosmosHub | Osmosis | Celestia | Injective | Sei | Kava => ChainFamily::Cosmos,
             Solana | Tron | XrpLedger | Cardano | Near | Sui | Aptos | Hedera | Algorand | Ton
-            | Stellar | Cctp | VeChain | Filecoin | Hyperliquid | Bittensor => ChainFamily::Other,
+            | Stellar | Cctp | VeChain | Filecoin | Hyperliquid | Bittensor | Monero | Zcash => {
+                ChainFamily::Other
+            }
         }
     }
 }

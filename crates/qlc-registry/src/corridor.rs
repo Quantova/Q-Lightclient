@@ -307,6 +307,49 @@ pub fn upgrade_tier(
         .map_err(|TierError::Downgrade { from, to }| RegistryError::TierDowngrade { from, to })
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TierLedger {
+    recorded: std::collections::BTreeMap<u32, VerificationTier>,
+}
+
+impl TierLedger {
+    pub fn new() -> TierLedger {
+        TierLedger {
+            recorded: std::collections::BTreeMap::new(),
+        }
+    }
+
+    pub fn current(&self, id: NetworkId) -> VerificationTier {
+        self.recorded
+            .get(&(id as u32))
+            .copied()
+            .unwrap_or_else(|| corridor(id).tier)
+    }
+
+    pub fn upgrade(
+        &mut self,
+        id: NetworkId,
+        proposed: VerificationTier,
+    ) -> Result<VerificationTier, RegistryError> {
+        let current = self.current(id);
+        let next = ratchet(current, proposed).map_err(|TierError::Downgrade { from, to }| {
+            RegistryError::TierDowngrade { from, to }
+        })?;
+        self.recorded.insert(id as u32, next);
+        Ok(next)
+    }
+
+    pub fn snapshot(&self) -> Vec<(u32, VerificationTier)> {
+        self.recorded.iter().map(|(&k, &v)| (k, v)).collect()
+    }
+
+    pub fn restore(&mut self, entries: &[(u32, VerificationTier)]) {
+        for &(id, tier) in entries {
+            self.recorded.insert(id, tier);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
