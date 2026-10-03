@@ -47,6 +47,19 @@ impl EventClaim {
     }
 }
 
+pub fn nonce_from_source_ref(source_ref: &[u8; SOURCE_REF_LEN]) -> u64 {
+    u64::from_be_bytes([
+        source_ref[0],
+        source_ref[1],
+        source_ref[2],
+        source_ref[3],
+        source_ref[4],
+        source_ref[5],
+        source_ref[6],
+        source_ref[7],
+    ])
+}
+
 pub fn is_proof_corridor(kind: StatementKind) -> bool {
     matches!(
         kind,
