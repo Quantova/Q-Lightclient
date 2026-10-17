@@ -121,25 +121,25 @@ pub fn corridor(id: NetworkId) -> Corridor {
         NetworkId::Osmosis => Corridor {
             id,
             name: "Osmosis",
-            tier: VerificationTier::LightClient,
+            tier: VerificationTier::Federated,
             finality: FinalityConfig::deterministic(1),
         },
         NetworkId::Celestia => Corridor {
             id,
             name: "Celestia",
-            tier: VerificationTier::LightClient,
+            tier: VerificationTier::Federated,
             finality: FinalityConfig::deterministic(1),
         },
         NetworkId::Injective => Corridor {
             id,
             name: "Injective",
-            tier: VerificationTier::LightClient,
+            tier: VerificationTier::Federated,
             finality: FinalityConfig::deterministic(1),
         },
         NetworkId::Sei => Corridor {
             id,
             name: "Sei",
-            tier: VerificationTier::LightClient,
+            tier: VerificationTier::Federated,
             finality: FinalityConfig::deterministic(1),
         },
         NetworkId::Kava => Corridor {
@@ -440,14 +440,7 @@ mod tests {
 
     #[test]
     fn light_client_networks_carry_the_light_client_tier() {
-        for id in [
-            NetworkId::Ethereum,
-            NetworkId::CosmosHub,
-            NetworkId::Osmosis,
-            NetworkId::Celestia,
-            NetworkId::Injective,
-            NetworkId::Sei,
-        ] {
+        for id in [NetworkId::Ethereum, NetworkId::CosmosHub] {
             assert_eq!(corridor(id).tier, VerificationTier::LightClient);
         }
         for id in [
@@ -456,6 +449,10 @@ mod tests {
             NetworkId::Base,
             NetworkId::Kava,
             NetworkId::RobinhoodChain,
+            NetworkId::Osmosis,
+            NetworkId::Celestia,
+            NetworkId::Injective,
+            NetworkId::Sei,
         ] {
             assert_eq!(corridor(id).tier, VerificationTier::Federated);
         }

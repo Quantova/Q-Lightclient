@@ -82,6 +82,21 @@ pub trait ForeignVerifier {
     fn verify_finalized(&self, event: &ForeignEvent) -> Result<VerifiedEvent, ForeignError>;
 }
 
+pub struct LinkedHeader {
+    pub prev: [u8; 32],
+    pub digest: [u8; 32],
+}
+
+pub trait HeaderVerifier {
+    fn link(&self, header: &[u8]) -> Result<LinkedHeader, ForeignError>;
+    fn verify_attestation(
+        &self,
+        height: u64,
+        digest: &[u8; 32],
+        attestation: &[u8],
+    ) -> Result<(), ForeignError>;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FollowState {
     pub trusted_height: u64,
@@ -99,8 +114,9 @@ impl FollowState {
     pub fn advance(
         &mut self,
         next_height: u64,
-        next_prev: [u8; 32],
-        next_digest: [u8; 32],
+        header: &[u8],
+        attestation: &[u8],
+        verifier: &impl HeaderVerifier,
     ) -> Result<(), ForeignError> {
         let expected_height = match self.trusted_height.checked_add(1) {
             Some(h) => h,
@@ -109,11 +125,13 @@ impl FollowState {
         if next_height != expected_height {
             return Err(ForeignError::Malformed);
         }
-        if next_prev != self.trusted_digest {
+        let linked = verifier.link(header)?;
+        if linked.prev != self.trusted_digest {
             return Err(ForeignError::BadProof);
         }
+        verifier.verify_attestation(next_height, &linked.digest, attestation)?;
         self.trusted_height = next_height;
-        self.trusted_digest = next_digest;
+        self.trusted_digest = linked.digest;
         Ok(())
     }
 }
@@ -144,11 +162,48 @@ mod tests {
         );
     }
 
+    struct Fixture;
+
+    impl HeaderVerifier for Fixture {
+        fn link(&self, header: &[u8]) -> Result<LinkedHeader, ForeignError> {
+            let prev: [u8; 32] = header
+                .get(..32)
+                .and_then(|b| b.try_into().ok())
+                .ok_or(ForeignError::Malformed)?;
+            let mut digest = [0u8; 32];
+            for (i, b) in header.iter().enumerate() {
+                digest[i % 32] ^= b.wrapping_add(i as u8);
+            }
+            Ok(LinkedHeader { prev, digest })
+        }
+
+        fn verify_attestation(
+            &self,
+            _height: u64,
+            digest: &[u8; 32],
+            attestation: &[u8],
+        ) -> Result<(), ForeignError> {
+            if attestation == digest {
+                Ok(())
+            } else {
+                Err(ForeignError::BadProof)
+            }
+        }
+    }
+
+    fn header(prev: [u8; 32]) -> Vec<u8> {
+        let mut h = prev.to_vec();
+        h.extend_from_slice(b"body");
+        h
+    }
+
     #[test]
     fn follow_state_rejects_a_broken_prev_link() {
         let mut s = FollowState::genesis(100, [1u8; 32]);
+        let h = header([9u8; 32]);
+        let digest = Fixture.link(&h).unwrap().digest;
         assert_eq!(
-            s.advance(101, [9u8; 32], [2u8; 32]),
+            s.advance(101, &h, &digest, &Fixture),
             Err(ForeignError::BadProof)
         );
         assert_eq!(s.trusted_height, 100);
@@ -157,16 +212,19 @@ mod tests {
     #[test]
     fn follow_state_advances_on_a_good_link() {
         let mut s = FollowState::genesis(100, [1u8; 32]);
-        assert!(s.advance(101, [1u8; 32], [2u8; 32]).is_ok());
+        let h = header([1u8; 32]);
+        let digest = Fixture.link(&h).unwrap().digest;
+        assert!(s.advance(101, &h, &digest, &Fixture).is_ok());
         assert_eq!(s.trusted_height, 101);
-        assert_eq!(s.trusted_digest, [2u8; 32]);
+        assert_eq!(s.trusted_digest, digest);
     }
 
     #[test]
     fn follow_state_at_the_max_height_refuses_without_overflow() {
         let mut s = FollowState::genesis(u64::MAX, [1u8; 32]);
+        let h = header([1u8; 32]);
         assert_eq!(
-            s.advance(0, [1u8; 32], [2u8; 32]),
+            s.advance(0, &h, &[], &Fixture),
             Err(ForeignError::Malformed)
         );
         assert_eq!(

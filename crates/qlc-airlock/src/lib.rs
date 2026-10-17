@@ -5,7 +5,7 @@
 use qlc_core::VerificationTier;
 use qlc_registry::{corridor_for_id, NetworkId};
 use qlc_stark::corridors::is_proof_corridor;
-use qlc_stark::{StarkStatement, StatementKind, QUANTOVA_DEST_CHAIN_ID};
+use qlc_stark::{StarkStatement, StarkVerifier, StatementKind, QUANTOVA_DEST_CHAIN_ID};
 
 pub const MAGIC: [u8; 4] = *b"QALK";
 pub const VERSION: u8 = 1;
@@ -51,6 +51,8 @@ pub enum IngressError {
     CorridorKindMismatch {
         corridor_id: u32,
     },
+    BadAttestation,
+    BadProof,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +70,40 @@ pub struct HashStark {
 pub struct Ingress {
     pub attestation: MlDsaAttestation,
     pub proof: HashStark,
+}
+
+pub trait AttestationVerifier {
+    fn verify(&self, statement: &[u8], signature: &[u8]) -> bool;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedIngress {
+    statement: StarkStatement,
+}
+
+impl VerifiedIngress {
+    pub fn statement(&self) -> &StarkStatement {
+        &self.statement
+    }
+}
+
+impl Ingress {
+    pub fn verify(
+        &self,
+        attester: &impl AttestationVerifier,
+        stark: &impl StarkVerifier,
+    ) -> Result<VerifiedIngress, IngressError> {
+        let encoded = self.proof.statement.encode();
+        if !attester.verify(&encoded, &self.attestation.signature) {
+            return Err(IngressError::BadAttestation);
+        }
+        if !stark.verify(&self.proof.statement, &self.proof.proof) {
+            return Err(IngressError::BadProof);
+        }
+        Ok(VerifiedIngress {
+            statement: self.proof.statement.clone(),
+        })
+    }
 }
 
 fn read_slot(bytes: &[u8], off: usize, slot: usize) -> Result<(u8, &[u8], usize), IngressError> {
@@ -180,9 +216,7 @@ fn kind_allows_corridor(kind: StatementKind, id: NetworkId) -> bool {
     match kind {
         StatementKind::BitcoinSpv => matches!(id, Bitcoin | BitcoinCash),
         StatementKind::EvmLightClient => matches!(id, Ethereum),
-        StatementKind::CosmosTendermint => {
-            matches!(id, CosmosHub | Osmosis | Celestia | Injective | Sei)
-        }
+        StatementKind::CosmosTendermint => matches!(id, CosmosHub),
         _ => false,
     }
 }
