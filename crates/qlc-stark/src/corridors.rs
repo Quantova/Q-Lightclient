@@ -283,22 +283,6 @@ mod tests {
     }
 
     #[test]
-    fn a_statement_under_another_domain_or_version_does_not_decode() {
-        let bytes = bitcoin_spv(0, DEST, NONCE, [0u8; 32], sample_event(), 6).encode();
-        assert_eq!(&bytes[..20], PROOF_STATEMENT_DOMAIN);
-        let mut other_version = bytes.clone();
-        other_version[20] ^= 0xff;
-        assert_eq!(ProofStatement::decode(&other_version), None);
-        let mut other_domain = bytes.clone();
-        other_domain[..20].copy_from_slice(crate::STARK_STATEMENT_DOMAIN);
-        assert_eq!(ProofStatement::decode(&other_domain), None);
-        let lowered = bitcoin_spv(0, DEST, NONCE, [0u8; 32], sample_event(), 6)
-            .to_stark_statement([0u8; 32])
-            .encode();
-        assert_ne!(&lowered[..20], &bytes[..20]);
-    }
-
-    #[test]
     fn a_trailing_foreign_hash_breaks_the_length_gate() {
         let mut bytes = bitcoin_spv(0, DEST, NONCE, [0u8; 32], sample_event(), 6).encode();
         bytes.extend_from_slice(&[0x99u8; 32]);

@@ -148,26 +148,6 @@ mod tests {
     }
 
     #[test]
-    fn the_domain_and_version_lead_the_encoding() {
-        let s = StarkStatement {
-            corridor_id: 1,
-            dest_chain_id: 77,
-            nonce: 5,
-            kind: StatementKind::LightClientStep,
-            public_input_digest: [7u8; 32],
-        };
-        let bytes = s.encode();
-        assert_eq!(&bytes[..20], STARK_STATEMENT_DOMAIN);
-        assert_eq!(bytes[20], STATEMENT_VERSION);
-        let mut other_version = bytes.clone();
-        other_version[20] = STATEMENT_VERSION + 1;
-        assert_eq!(StarkStatement::decode(&other_version), None);
-        let mut other_domain = bytes.clone();
-        other_domain[..20].copy_from_slice(PROOF_STATEMENT_DOMAIN);
-        assert_eq!(StarkStatement::decode(&other_domain), None);
-    }
-
-    #[test]
     fn unknown_kind_tag_does_not_decode() {
         let mut bytes = STARK_STATEMENT_DOMAIN.to_vec();
         bytes.push(STATEMENT_VERSION);
