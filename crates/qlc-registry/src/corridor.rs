@@ -411,7 +411,10 @@ mod tests {
     #[test]
     fn spv_networks_carry_the_spv_tier() {
         assert_eq!(corridor(NetworkId::Bitcoin).tier, VerificationTier::Spv);
-        assert_eq!(corridor(NetworkId::BitcoinCash).tier, VerificationTier::Federated);
+        assert_eq!(
+            corridor(NetworkId::BitcoinCash).tier,
+            VerificationTier::Federated
+        );
     }
 
     #[test]
