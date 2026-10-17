@@ -28,6 +28,8 @@ The interfaces it defines, all intended for post quantum primitives only.
 
 Only NIST standardized post quantum schemes exist here. ML-DSA-65 from FIPS 204 and SLH-DSA from FIPS 205 for signatures, ML-KEM from FIPS 203 for key establishment, and SHA-3 and SHAKE from FIPS 202 for hashing. There is no elliptic curve anywhere and no classical escape hatch. The cryptography is a from scratch reference implementation validated against the NIST vectors. It has not been through an independent security audit, and the chain is at testnet.
 
+A proof statement nonce is the first eight bytes of the source reference, so two references that share that prefix share a nonce. The nonce is not unique, and a consumer must de-duplicate deposits on the full thirty two byte source reference, as Q-Oracle does.
+
 ## Governance and license
 
 Governed by the crypto policy, POLICY-crypto, in the Quantova-Specs repository, which outranks every other rule here. Commits are authored by the owner only. Dual licensed under Apache 2.0 and MIT.

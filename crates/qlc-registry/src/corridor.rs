@@ -25,7 +25,7 @@ pub fn corridor(id: NetworkId) -> Corridor {
         NetworkId::BitcoinCash => Corridor {
             id,
             name: "Bitcoin Cash",
-            tier: VerificationTier::Spv,
+            tier: VerificationTier::Federated,
             finality: FinalityConfig::probabilistic(10, 10),
         },
         NetworkId::Ethereum => Corridor {
@@ -343,10 +343,13 @@ impl TierLedger {
         self.recorded.iter().map(|(&k, &v)| (k, v)).collect()
     }
 
-    pub fn restore(&mut self, entries: &[(u32, VerificationTier)]) {
-        for &(id, tier) in entries {
-            self.recorded.insert(id, tier);
+    pub fn restore(&mut self, entries: &[(u32, VerificationTier)]) -> Result<(), RegistryError> {
+        for &(raw, tier) in entries {
+            let id = NetworkId::try_from(raw)
+                .map_err(|UnknownNetworkId(bad)| RegistryError::UnknownNetwork(bad))?;
+            self.upgrade(id, tier)?;
         }
+        Ok(())
     }
 }
 
@@ -408,7 +411,7 @@ mod tests {
     #[test]
     fn spv_networks_carry_the_spv_tier() {
         assert_eq!(corridor(NetworkId::Bitcoin).tier, VerificationTier::Spv);
-        assert_eq!(corridor(NetworkId::BitcoinCash).tier, VerificationTier::Spv);
+        assert_eq!(corridor(NetworkId::BitcoinCash).tier, VerificationTier::Federated);
     }
 
     #[test]

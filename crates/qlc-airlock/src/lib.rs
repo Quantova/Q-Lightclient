@@ -214,7 +214,7 @@ pub fn parse_ingress(bytes: &[u8]) -> Result<Ingress, IngressError> {
 fn kind_allows_corridor(kind: StatementKind, id: NetworkId) -> bool {
     use NetworkId::*;
     match kind {
-        StatementKind::BitcoinSpv => matches!(id, Bitcoin | BitcoinCash),
+        StatementKind::BitcoinSpv => matches!(id, Bitcoin),
         StatementKind::EvmLightClient => matches!(id, Ethereum),
         StatementKind::CosmosTendermint => matches!(id, CosmosHub),
         _ => false,
