@@ -1,7 +1,9 @@
 // Copyright 2026 Quantova Inc
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use crate::{StarkStatement, StatementKind};
+use crate::{
+    strip_tagged_header, tagged_header, StarkStatement, StatementKind, PROOF_STATEMENT_DOMAIN,
+};
 
 pub const SOURCE_REF_LEN: usize = 32;
 pub const ASSET_ID_LEN: usize = 16;
@@ -79,10 +81,12 @@ pub struct ProofStatement {
 }
 
 impl ProofStatement {
-    pub const ENCODED_LEN: usize = 4 + 4 + 8 + 1 + ANCHOR_LEN + EventClaim::ENCODED_LEN + 4;
+    pub const BODY_LEN: usize = 4 + 4 + 8 + 1 + ANCHOR_LEN + EventClaim::ENCODED_LEN + 4;
+    pub const ENCODED_LEN: usize = PROOF_STATEMENT_DOMAIN.len() + 1 + Self::BODY_LEN;
 
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(Self::ENCODED_LEN);
+        tagged_header(PROOF_STATEMENT_DOMAIN, &mut out);
         out.extend_from_slice(&self.corridor_id.to_le_bytes());
         out.extend_from_slice(&self.dest_chain_id.to_le_bytes());
         out.extend_from_slice(&self.nonce.to_le_bytes());
@@ -97,6 +101,7 @@ impl ProofStatement {
         if bytes.len() != Self::ENCODED_LEN {
             return None;
         }
+        let bytes = strip_tagged_header(PROOF_STATEMENT_DOMAIN, bytes)?;
         let corridor_id = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
         let dest_chain_id = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
         let nonce = u64::from_le_bytes([
@@ -207,7 +212,11 @@ mod tests {
 
     #[test]
     fn public_inputs_are_fixed_width_with_no_room_for_foreign_material() {
-        assert_eq!(ProofStatement::ENCODED_LEN, 4 + 4 + 8 + 1 + 32 + 96 + 4);
+        assert_eq!(ProofStatement::BODY_LEN, 4 + 4 + 8 + 1 + 32 + 96 + 4);
+        assert_eq!(
+            ProofStatement::ENCODED_LEN,
+            20 + 1 + ProofStatement::BODY_LEN
+        );
         let s = bitcoin_spv(0, DEST, NONCE, [0u8; 32], sample_event(), 6);
         assert_eq!(s.encode().len(), ProofStatement::ENCODED_LEN);
     }
@@ -269,8 +278,24 @@ mod tests {
         assert!(!is_proof_corridor(StatementKind::HeaderChain));
         assert!(!is_proof_corridor(StatementKind::LightClientStep));
         let mut bytes = bitcoin_spv(0, DEST, NONCE, [0u8; 32], sample_event(), 6).encode();
-        bytes[16] = StatementKind::HeaderChain.tag();
+        bytes[21 + 16] = StatementKind::HeaderChain.tag();
         assert_eq!(ProofStatement::decode(&bytes), None);
+    }
+
+    #[test]
+    fn a_statement_under_another_domain_or_version_does_not_decode() {
+        let bytes = bitcoin_spv(0, DEST, NONCE, [0u8; 32], sample_event(), 6).encode();
+        assert_eq!(&bytes[..20], PROOF_STATEMENT_DOMAIN);
+        let mut other_version = bytes.clone();
+        other_version[20] ^= 0xff;
+        assert_eq!(ProofStatement::decode(&other_version), None);
+        let mut other_domain = bytes.clone();
+        other_domain[..20].copy_from_slice(crate::STARK_STATEMENT_DOMAIN);
+        assert_eq!(ProofStatement::decode(&other_domain), None);
+        let lowered = bitcoin_spv(0, DEST, NONCE, [0u8; 32], sample_event(), 6)
+            .to_stark_statement([0u8; 32])
+            .encode();
+        assert_ne!(&lowered[..20], &bytes[..20]);
     }
 
     #[test]

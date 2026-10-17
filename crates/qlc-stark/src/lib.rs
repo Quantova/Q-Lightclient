@@ -9,6 +9,23 @@ pub use sha3::{sha3_256, shake256_256};
 
 pub const QUANTOVA_DEST_CHAIN_ID: u32 = 4801;
 
+pub const STATEMENT_VERSION: u8 = 1;
+pub const STARK_STATEMENT_DOMAIN: &[u8; 20] = b"QUANTOVA/QLC/STARK/\0";
+pub const PROOF_STATEMENT_DOMAIN: &[u8; 20] = b"QUANTOVA/QLC/PROOF/\0";
+
+pub(crate) fn tagged_header(domain: &[u8; 20], out: &mut Vec<u8>) {
+    out.extend_from_slice(domain);
+    out.push(STATEMENT_VERSION);
+}
+
+pub(crate) fn strip_tagged_header<'a>(domain: &[u8; 20], bytes: &'a [u8]) -> Option<&'a [u8]> {
+    let body = bytes.strip_prefix(domain.as_slice())?;
+    match body.split_first() {
+        Some((&STATEMENT_VERSION, rest)) => Some(rest),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatementKind {
     BitcoinSpv,
@@ -51,10 +68,11 @@ pub struct StarkStatement {
 }
 
 impl StarkStatement {
-    pub const ENCODED_LEN: usize = 1 + 4 + 4 + 8 + 32;
+    pub const ENCODED_LEN: usize = STARK_STATEMENT_DOMAIN.len() + 1 + 1 + 4 + 4 + 8 + 32;
 
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(Self::ENCODED_LEN);
+        tagged_header(STARK_STATEMENT_DOMAIN, &mut out);
         out.push(self.kind.tag());
         out.extend_from_slice(&self.corridor_id.to_le_bytes());
         out.extend_from_slice(&self.dest_chain_id.to_le_bytes());
@@ -67,6 +85,7 @@ impl StarkStatement {
         if bytes.len() != Self::ENCODED_LEN {
             return None;
         }
+        let bytes = strip_tagged_header(STARK_STATEMENT_DOMAIN, bytes)?;
         let kind = StatementKind::from_tag(bytes[0])?;
         let corridor_id = u32::from_le_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]);
         let dest_chain_id = u32::from_le_bytes([bytes[5], bytes[6], bytes[7], bytes[8]]);
@@ -129,8 +148,30 @@ mod tests {
     }
 
     #[test]
+    fn the_domain_and_version_lead_the_encoding() {
+        let s = StarkStatement {
+            corridor_id: 1,
+            dest_chain_id: 77,
+            nonce: 5,
+            kind: StatementKind::LightClientStep,
+            public_input_digest: [7u8; 32],
+        };
+        let bytes = s.encode();
+        assert_eq!(&bytes[..20], STARK_STATEMENT_DOMAIN);
+        assert_eq!(bytes[20], STATEMENT_VERSION);
+        let mut other_version = bytes.clone();
+        other_version[20] = STATEMENT_VERSION + 1;
+        assert_eq!(StarkStatement::decode(&other_version), None);
+        let mut other_domain = bytes.clone();
+        other_domain[..20].copy_from_slice(PROOF_STATEMENT_DOMAIN);
+        assert_eq!(StarkStatement::decode(&other_domain), None);
+    }
+
+    #[test]
     fn unknown_kind_tag_does_not_decode() {
-        let mut bytes = vec![9u8];
+        let mut bytes = STARK_STATEMENT_DOMAIN.to_vec();
+        bytes.push(STATEMENT_VERSION);
+        bytes.push(9u8);
         bytes.extend_from_slice(&1u32.to_le_bytes());
         bytes.extend_from_slice(&2u32.to_le_bytes());
         bytes.extend_from_slice(&3u64.to_le_bytes());
