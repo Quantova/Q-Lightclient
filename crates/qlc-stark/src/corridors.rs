@@ -115,6 +115,9 @@ impl ProofStatement {
         anchor.copy_from_slice(&bytes[17..49]);
         let event = EventClaim::decode_from(&bytes[49..145])?;
         let finality_depth = u32::from_le_bytes([bytes[145], bytes[146], bytes[147], bytes[148]]);
+        if nonce != nonce_from_source_ref(&event.source_ref) {
+            return None;
+        }
         Some(ProofStatement {
             corridor_id,
             dest_chain_id,
@@ -126,13 +129,17 @@ impl ProofStatement {
         })
     }
 
-    pub fn to_stark_statement(&self, public_input_digest: [u8; 32]) -> StarkStatement {
+    pub fn public_input_digest(&self) -> [u8; 32] {
+        crate::shake256_256(&self.encode())
+    }
+
+    pub fn to_stark_statement(&self) -> StarkStatement {
         StarkStatement {
             corridor_id: self.corridor_id,
             dest_chain_id: self.dest_chain_id,
             nonce: self.nonce,
             kind: self.kind,
-            public_input_digest,
+            public_input_digest: self.public_input_digest(),
         }
     }
 }
@@ -199,7 +206,7 @@ mod tests {
     use super::*;
 
     const DEST: u32 = 4801;
-    const NONCE: u64 = 990_001;
+    const NONCE: u64 = 0x1111_1111_1111_1111;
 
     fn sample_event() -> EventClaim {
         EventClaim {
@@ -292,11 +299,14 @@ mod tests {
     #[test]
     fn lowering_carries_the_corridor_kind_destination_and_nonce() {
         let s = cosmos_tendermint(8, DEST, NONCE, [0u8; 32], sample_event(), 2);
-        let lowered = s.to_stark_statement([7u8; 32]);
+        let lowered = s.to_stark_statement();
         assert_eq!(lowered.corridor_id, 8);
         assert_eq!(lowered.dest_chain_id, DEST);
         assert_eq!(lowered.nonce, NONCE);
         assert_eq!(lowered.kind, StatementKind::CosmosTendermint);
-        assert_eq!(lowered.public_input_digest, [7u8; 32]);
+        assert_eq!(
+            lowered.public_input_digest,
+            crate::shake256_256(&s.encode())
+        );
     }
 }

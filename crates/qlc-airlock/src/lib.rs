@@ -2,21 +2,26 @@
 // Copyright 2026 Quantova Inc
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+use std::collections::BTreeSet;
+
 use qlc_core::VerificationTier;
-use qlc_registry::{corridor_for_id, NetworkId};
-use qlc_stark::corridors::is_proof_corridor;
-use qlc_stark::{StarkStatement, StarkVerifier, StatementKind, QUANTOVA_DEST_CHAIN_ID};
+use qlc_registry::{corridor_for_id, NetworkId, RegistryError, TierLedger};
+use qlc_stark::corridors::{is_proof_corridor, nonce_from_source_ref, ProofStatement};
+use qlc_stark::{shake256_256, StarkStatement, StarkVerifier, StatementKind};
 
 pub const MAGIC: [u8; 4] = *b"QALK";
-pub const VERSION: u8 = 1;
+pub const VERSION: u8 = 2;
 
 pub const SUITE_ML_DSA: u8 = 0x01;
 pub const SUITE_HASH_STARK: u8 = 0x02;
 
 pub const ML_DSA_65_SIG_LEN: usize = 3309;
 pub const STARK_STATEMENT_LEN: usize = StarkStatement::ENCODED_LEN;
-pub const MIN_HASH_STARK_LEN: usize = STARK_STATEMENT_LEN + 1;
-pub const MAX_HASH_STARK_LEN: usize = 1 << 20;
+pub const CLAIM_LEN: usize = ProofStatement::ENCODED_LEN;
+pub const MIN_HASH_STARK_LEN: usize = STARK_STATEMENT_LEN + CLAIM_LEN + 1;
+pub const MAX_HASH_STARK_LEN: usize = 32 << 20;
+
+const REPLAY_DOMAIN: &[u8] = b"quantova/airlock/replay/1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IngressError {
@@ -51,25 +56,34 @@ pub enum IngressError {
     CorridorKindMismatch {
         corridor_id: u32,
     },
+    UnboundClaim,
+    ShallowFinality {
+        required: u32,
+        found: u32,
+    },
+    Replay,
     BadAttestation,
     BadProof,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MlDsaAttestation {
-    pub signature: Vec<u8>,
+    signature: Vec<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HashStark {
-    pub statement: StarkStatement,
-    pub proof: Vec<u8>,
+impl MlDsaAttestation {
+    pub fn signature(&self) -> &[u8] {
+        &self.signature
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ingress {
-    pub attestation: MlDsaAttestation,
-    pub proof: HashStark,
+    attestation: MlDsaAttestation,
+    statement: StarkStatement,
+    claim: ProofStatement,
+    proof: Vec<u8>,
+    tier: VerificationTier,
 }
 
 pub trait AttestationVerifier {
@@ -79,31 +93,209 @@ pub trait AttestationVerifier {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerifiedIngress {
     statement: StarkStatement,
+    claim: ProofStatement,
+    replay_key: [u8; 32],
 }
 
 impl VerifiedIngress {
     pub fn statement(&self) -> &StarkStatement {
         &self.statement
     }
+
+    pub fn claim(&self) -> &ProofStatement {
+        &self.claim
+    }
+
+    pub fn replay_key(&self) -> [u8; 32] {
+        self.replay_key
+    }
+}
+
+pub fn replay_key_of(claim: &ProofStatement) -> [u8; 32] {
+    let mut bytes = Vec::with_capacity(REPLAY_DOMAIN.len() + 4 + 32);
+    bytes.extend_from_slice(REPLAY_DOMAIN);
+    bytes.extend_from_slice(&claim.corridor_id.to_le_bytes());
+    bytes.extend_from_slice(&claim.event.source_ref);
+    shake256_256(&bytes)
 }
 
 impl Ingress {
+    pub fn attestation(&self) -> &MlDsaAttestation {
+        &self.attestation
+    }
+
+    pub fn statement(&self) -> &StarkStatement {
+        &self.statement
+    }
+
+    pub fn claim(&self) -> &ProofStatement {
+        &self.claim
+    }
+
+    pub fn proof(&self) -> &[u8] {
+        &self.proof
+    }
+
     pub fn verify(
         &self,
+        dest_chain_id: u32,
         attester: &impl AttestationVerifier,
         stark: &impl StarkVerifier,
     ) -> Result<VerifiedIngress, IngressError> {
-        let encoded = self.proof.statement.encode();
+        let tier = check(&self.statement, &self.claim, dest_chain_id)?;
+        if tier != self.tier {
+            return Err(IngressError::CorridorKindMismatch {
+                corridor_id: self.statement.corridor_id,
+            });
+        }
+        let encoded = self.statement.encode();
         if !attester.verify(&encoded, &self.attestation.signature) {
             return Err(IngressError::BadAttestation);
         }
-        if !stark.verify(&self.proof.statement, &self.proof.proof) {
+        if !stark.verify(&self.statement, &self.proof) {
             return Err(IngressError::BadProof);
         }
         Ok(VerifiedIngress {
-            statement: self.proof.statement.clone(),
+            statement: self.statement.clone(),
+            claim: self.claim,
+            replay_key: replay_key_of(&self.claim),
         })
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Airlock {
+    dest_chain_id: u32,
+    seen: BTreeSet<[u8; 32]>,
+    tiers: TierLedger,
+}
+
+impl Airlock {
+    pub fn new(dest_chain_id: u32) -> Airlock {
+        Airlock {
+            dest_chain_id,
+            seen: BTreeSet::new(),
+            tiers: TierLedger::new(),
+        }
+    }
+
+    pub fn restore(
+        dest_chain_id: u32,
+        seen: impl IntoIterator<Item = [u8; 32]>,
+        tiers: TierLedger,
+    ) -> Airlock {
+        Airlock {
+            dest_chain_id,
+            seen: seen.into_iter().collect(),
+            tiers,
+        }
+    }
+
+    pub fn seen(&self) -> impl Iterator<Item = &[u8; 32]> {
+        self.seen.iter()
+    }
+
+    pub fn tiers(&self) -> &TierLedger {
+        &self.tiers
+    }
+
+    pub fn upgrade_tier(
+        &mut self,
+        id: NetworkId,
+        proposed: VerificationTier,
+    ) -> Result<VerificationTier, RegistryError> {
+        self.tiers.upgrade(id, proposed)
+    }
+
+    pub fn admit(
+        &mut self,
+        bytes: &[u8],
+        attester: &impl AttestationVerifier,
+        stark: &impl StarkVerifier,
+    ) -> Result<VerifiedIngress, IngressError> {
+        let ingress = parse_ingress(bytes, self.dest_chain_id)?;
+        let id = NetworkId::try_from(ingress.statement.corridor_id).map_err(|_| {
+            IngressError::UnknownCorridor {
+                corridor_id: ingress.statement.corridor_id,
+            }
+        })?;
+        if self.tiers.current(id) != ingress.tier {
+            return Err(IngressError::CorridorKindMismatch {
+                corridor_id: ingress.statement.corridor_id,
+            });
+        }
+        let key = replay_key_of(&ingress.claim);
+        if self.seen.contains(&key) {
+            return Err(IngressError::Replay);
+        }
+        let verified = ingress.verify(self.dest_chain_id, attester, stark)?;
+        self.seen.insert(key);
+        Ok(verified)
+    }
+}
+
+fn check(
+    statement: &StarkStatement,
+    claim: &ProofStatement,
+    dest_chain_id: u32,
+) -> Result<VerificationTier, IngressError> {
+    let tier = check_statement(statement, dest_chain_id)?;
+    check_claim(statement, claim)?;
+    Ok(tier)
+}
+
+fn check_statement(
+    statement: &StarkStatement,
+    dest_chain_id: u32,
+) -> Result<VerificationTier, IngressError> {
+    if statement.dest_chain_id != dest_chain_id {
+        return Err(IngressError::WrongDestination {
+            expected: dest_chain_id,
+            found: statement.dest_chain_id,
+        });
+    }
+    if !is_proof_corridor(statement.kind) {
+        return Err(IngressError::NotProofCorridor);
+    }
+    let corridor =
+        corridor_for_id(statement.corridor_id).map_err(|_| IngressError::UnknownCorridor {
+            corridor_id: statement.corridor_id,
+        })?;
+    let expected_tier = match statement.kind {
+        StatementKind::BitcoinSpv => VerificationTier::Spv,
+        StatementKind::EvmLightClient => VerificationTier::LightClient,
+        StatementKind::CosmosTendermint => VerificationTier::LightClient,
+        _ => return Err(IngressError::NotProofCorridor),
+    };
+    if corridor.tier != expected_tier || !kind_allows_corridor(statement.kind, corridor.id) {
+        return Err(IngressError::CorridorKindMismatch {
+            corridor_id: statement.corridor_id,
+        });
+    }
+    Ok(expected_tier)
+}
+
+fn check_claim(statement: &StarkStatement, claim: &ProofStatement) -> Result<(), IngressError> {
+    let corridor =
+        corridor_for_id(statement.corridor_id).map_err(|_| IngressError::UnknownCorridor {
+            corridor_id: statement.corridor_id,
+        })?;
+    if claim.corridor_id != statement.corridor_id
+        || claim.dest_chain_id != statement.dest_chain_id
+        || claim.nonce != statement.nonce
+        || claim.kind != statement.kind
+        || claim.nonce != nonce_from_source_ref(&claim.event.source_ref)
+        || shake256_256(&claim.encode()) != statement.public_input_digest
+    {
+        return Err(IngressError::UnboundClaim);
+    }
+    if claim.finality_depth < corridor.finality.confirmation_depth {
+        return Err(IngressError::ShallowFinality {
+            required: corridor.finality.confirmation_depth,
+            found: claim.finality_depth,
+        });
+    }
+    Ok(())
 }
 
 fn read_slot(bytes: &[u8], off: usize, slot: usize) -> Result<(u8, &[u8], usize), IngressError> {
@@ -134,7 +326,7 @@ fn read_slot(bytes: &[u8], off: usize, slot: usize) -> Result<(u8, &[u8], usize)
     Ok((suite, &bytes[start..end], end))
 }
 
-pub fn parse_ingress(bytes: &[u8]) -> Result<Ingress, IngressError> {
+pub fn parse_ingress(bytes: &[u8], dest_chain_id: u32) -> Result<Ingress, IngressError> {
     if bytes.len() < MAGIC.len() + 1 {
         return Err(IngressError::TooShort);
     }
@@ -175,39 +367,20 @@ pub fn parse_ingress(bytes: &[u8]) -> Result<Ingress, IngressError> {
 
     let statement = StarkStatement::decode(&payload1[0..STARK_STATEMENT_LEN])
         .ok_or(IngressError::BadStatement)?;
-    if statement.dest_chain_id != QUANTOVA_DEST_CHAIN_ID {
-        return Err(IngressError::WrongDestination {
-            expected: QUANTOVA_DEST_CHAIN_ID,
-            found: statement.dest_chain_id,
-        });
-    }
-    if !is_proof_corridor(statement.kind) {
-        return Err(IngressError::NotProofCorridor);
-    }
-    let corridor =
-        corridor_for_id(statement.corridor_id).map_err(|_| IngressError::UnknownCorridor {
-            corridor_id: statement.corridor_id,
-        })?;
-    let expected_tier = match statement.kind {
-        StatementKind::BitcoinSpv => VerificationTier::Spv,
-        StatementKind::EvmLightClient => VerificationTier::LightClient,
-        StatementKind::CosmosTendermint => VerificationTier::LightClient,
-        _ => return Err(IngressError::NotProofCorridor),
-    };
-    if corridor.tier != expected_tier || !kind_allows_corridor(statement.kind, corridor.id) {
-        return Err(IngressError::CorridorKindMismatch {
-            corridor_id: statement.corridor_id,
-        });
-    }
+    let tier = check_statement(&statement, dest_chain_id)?;
+    let claim =
+        ProofStatement::decode(&payload1[STARK_STATEMENT_LEN..STARK_STATEMENT_LEN + CLAIM_LEN])
+            .ok_or(IngressError::BadStatement)?;
+    check_claim(&statement, &claim)?;
 
     Ok(Ingress {
         attestation: MlDsaAttestation {
             signature: payload0.to_vec(),
         },
-        proof: HashStark {
-            statement,
-            proof: payload1[STARK_STATEMENT_LEN..].to_vec(),
-        },
+        statement,
+        claim,
+        proof: payload1[STARK_STATEMENT_LEN + CLAIM_LEN..].to_vec(),
+        tier,
     })
 }
 
@@ -223,25 +396,65 @@ fn kind_allows_corridor(kind: StatementKind, id: NetworkId) -> bool {
 
 fn push_slot(out: &mut Vec<u8>, suite: u8, payload: &[u8]) {
     out.push(suite);
-    out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(payload.len().min(u32::MAX as usize) as u32).to_le_bytes());
     out.extend_from_slice(payload);
 }
 
-pub fn encode_ingress(attestation: &[u8], statement: &StarkStatement, proof: &[u8]) -> Vec<u8> {
-    let mut stark_payload = statement.encode();
+pub fn encode_ingress(
+    attestation: &[u8],
+    claim: &ProofStatement,
+    proof: &[u8],
+) -> Result<Vec<u8>, IngressError> {
+    if attestation.len() != ML_DSA_65_SIG_LEN {
+        return Err(IngressError::BadArtifactLength { slot: 0 });
+    }
+    let mut stark_payload = claim.to_stark_statement().encode();
+    stark_payload.extend_from_slice(&claim.encode());
     stark_payload.extend_from_slice(proof);
+    if stark_payload.len() > MAX_HASH_STARK_LEN {
+        return Err(IngressError::BadArtifactLength { slot: 1 });
+    }
     let mut out = Vec::new();
     out.extend_from_slice(&MAGIC);
     out.push(VERSION);
     push_slot(&mut out, SUITE_ML_DSA, attestation);
     push_slot(&mut out, SUITE_HASH_STARK, &stark_payload);
-    out
+    Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use qlc_stark::StatementKind;
+    use qlc_stark::corridors::EventClaim;
+    use qlc_stark::{StatementKind, QUANTOVA_DEST_CHAIN_ID};
+
+    pub(super) fn claim(
+        corridor_id: u32,
+        dest_chain_id: u32,
+        kind: StatementKind,
+    ) -> ProofStatement {
+        let source_ref = [0x11u8; 32];
+        ProofStatement {
+            corridor_id,
+            dest_chain_id,
+            nonce: nonce_from_source_ref(&source_ref),
+            kind,
+            anchor: [0x44u8; 32],
+            event: EventClaim {
+                source_ref,
+                asset_id: [0x22u8; 16],
+                amount: 1_000,
+                recipient: [0x33u8; 32],
+            },
+            finality_depth: 1_000_000,
+        }
+    }
+
+    fn stark_payload() -> Vec<u8> {
+        let mut out = proof_statement().to_stark_statement().encode();
+        out.extend_from_slice(&proof_statement().encode());
+        out
+    }
 
     const FOREIGN_SUITE_ED25519: u8 = 0x10;
     const FOREIGN_SUITE_SECP256K1: u8 = 0x11;
@@ -251,14 +464,8 @@ mod tests {
         vec![0x07u8; ML_DSA_65_SIG_LEN]
     }
 
-    fn proof_statement() -> StarkStatement {
-        StarkStatement {
-            corridor_id: 43,
-            dest_chain_id: 4801,
-            nonce: 990_001,
-            kind: StatementKind::BitcoinSpv,
-            public_input_digest: [0x5au8; 32],
-        }
+    fn proof_statement() -> ProofStatement {
+        claim(43, 4801, StatementKind::BitcoinSpv)
     }
 
     fn ed25519_signature() -> Vec<u8> {
@@ -306,24 +513,32 @@ mod tests {
 
     #[test]
     fn the_statement_length_constant_tracks_the_stark_encoding() {
-        assert_eq!(proof_statement().encode().len(), STARK_STATEMENT_LEN);
+        assert_eq!(
+            proof_statement().to_stark_statement().encode().len(),
+            STARK_STATEMENT_LEN
+        );
     }
 
     #[test]
     fn a_well_formed_ingress_parses_to_the_two_post_quantum_artifacts() {
-        let bytes = encode_ingress(&ml_dsa_attestation(), &proof_statement(), &[0x01u8; 200]);
-        let ingress = parse_ingress(&bytes).unwrap();
-        assert_eq!(ingress.attestation.signature.len(), ML_DSA_65_SIG_LEN);
-        assert!(is_proof_corridor(ingress.proof.statement.kind));
-        assert_eq!(ingress.proof.proof, vec![0x01u8; 200]);
+        let bytes =
+            encode_ingress(&ml_dsa_attestation(), &proof_statement(), &[0x01u8; 200]).unwrap();
+        let ingress = parse_ingress(&bytes, QUANTOVA_DEST_CHAIN_ID).unwrap();
+        assert_eq!(ingress.attestation().signature().len(), ML_DSA_65_SIG_LEN);
+        assert!(is_proof_corridor(ingress.statement().kind));
+        assert_eq!(ingress.proof(), &[0x01u8; 200][..]);
     }
 
     #[test]
     fn an_oversized_proof_slot_is_refused() {
         let huge = vec![0u8; MAX_HASH_STARK_LEN + 1];
-        let bytes = encode_ingress(&ml_dsa_attestation(), &proof_statement(), &huge);
         assert_eq!(
-            parse_ingress(&bytes),
+            encode_ingress(&ml_dsa_attestation(), &proof_statement(), &huge),
+            Err(IngressError::BadArtifactLength { slot: 1 })
+        );
+        let bytes = wrap_two_slots(SUITE_ML_DSA, &ml_dsa_attestation(), SUITE_HASH_STARK, &huge);
+        assert_eq!(
+            parse_ingress(&bytes, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::BadArtifactLength { slot: 1 })
         );
     }
@@ -335,100 +550,67 @@ mod tests {
             (StatementKind::EvmLightClient, 2u32),
             (StatementKind::CosmosTendermint, 16u32),
         ] {
-            let statement = StarkStatement {
-                corridor_id,
-                dest_chain_id: 4801,
-                nonce: 990_001,
-                kind,
-                public_input_digest: [9u8; 32],
-            };
-            let bytes = encode_ingress(&ml_dsa_attestation(), &statement, &[0x02u8; 8]);
-            assert_eq!(parse_ingress(&bytes).unwrap().proof.statement.kind, kind);
+            let statement = claim(corridor_id, 4801, kind);
+            let bytes = encode_ingress(&ml_dsa_attestation(), &statement, &[0x02u8; 8]).unwrap();
+            assert_eq!(
+                parse_ingress(&bytes, QUANTOVA_DEST_CHAIN_ID)
+                    .unwrap()
+                    .statement()
+                    .kind,
+                kind
+            );
         }
     }
 
     #[test]
     fn a_proof_under_a_mismatched_or_unknown_corridor_is_rejected() {
-        let mismatched = StarkStatement {
-            corridor_id: 38,
-            dest_chain_id: 4801,
-            nonce: 990_001,
-            kind: StatementKind::BitcoinSpv,
-            public_input_digest: [9u8; 32],
-        };
-        let bytes = encode_ingress(&ml_dsa_attestation(), &mismatched, &[0x02u8; 8]);
+        let mismatched = claim(38, 4801, StatementKind::BitcoinSpv);
+        let bytes = encode_ingress(&ml_dsa_attestation(), &mismatched, &[0x02u8; 8]).unwrap();
         assert_eq!(
-            parse_ingress(&bytes),
+            parse_ingress(&bytes, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::CorridorKindMismatch { corridor_id: 38 })
         );
 
-        let retired = StarkStatement {
-            corridor_id: 0,
-            dest_chain_id: 4801,
-            nonce: 990_001,
-            kind: StatementKind::BitcoinSpv,
-            public_input_digest: [9u8; 32],
-        };
-        let bytes = encode_ingress(&ml_dsa_attestation(), &retired, &[0x02u8; 8]);
+        let retired = claim(0, 4801, StatementKind::BitcoinSpv);
+        let bytes = encode_ingress(&ml_dsa_attestation(), &retired, &[0x02u8; 8]).unwrap();
         assert_eq!(
-            parse_ingress(&bytes),
+            parse_ingress(&bytes, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::UnknownCorridor { corridor_id: 0 })
         );
 
-        let unknown = StarkStatement {
-            corridor_id: 4_000_000_000,
-            dest_chain_id: 4801,
-            nonce: 990_001,
-            kind: StatementKind::EvmLightClient,
-            public_input_digest: [9u8; 32],
-        };
-        let bytes = encode_ingress(&ml_dsa_attestation(), &unknown, &[0x02u8; 8]);
+        let unknown = claim(4_000_000_000, 4801, StatementKind::EvmLightClient);
+        let bytes = encode_ingress(&ml_dsa_attestation(), &unknown, &[0x02u8; 8]).unwrap();
         assert_eq!(
-            parse_ingress(&bytes),
+            parse_ingress(&bytes, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::UnknownCorridor {
                 corridor_id: 4_000_000_000
             })
         );
 
-        let cross = StarkStatement {
-            corridor_id: 16,
-            dest_chain_id: 4801,
-            nonce: 990_001,
-            kind: StatementKind::EvmLightClient,
-            public_input_digest: [9u8; 32],
-        };
-        let bytes = encode_ingress(&ml_dsa_attestation(), &cross, &[0x02u8; 8]);
+        let cross = claim(16, 4801, StatementKind::EvmLightClient);
+        let bytes = encode_ingress(&ml_dsa_attestation(), &cross, &[0x02u8; 8]).unwrap();
         assert_eq!(
-            parse_ingress(&bytes),
+            parse_ingress(&bytes, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::CorridorKindMismatch { corridor_id: 16 })
         );
     }
 
     #[test]
     fn a_generic_non_proof_statement_does_not_cross() {
-        let statement = StarkStatement {
-            corridor_id: 1,
-            dest_chain_id: 4801,
-            nonce: 990_001,
-            kind: StatementKind::LightClientStep,
-            public_input_digest: [9u8; 32],
-        };
-        let bytes = encode_ingress(&ml_dsa_attestation(), &statement, &[0x02u8; 8]);
-        assert_eq!(parse_ingress(&bytes), Err(IngressError::NotProofCorridor));
+        let statement = claim(1, 4801, StatementKind::LightClientStep);
+        let bytes = encode_ingress(&ml_dsa_attestation(), &statement, &[0x02u8; 8]).unwrap();
+        assert_eq!(
+            parse_ingress(&bytes, QUANTOVA_DEST_CHAIN_ID),
+            Err(IngressError::NotProofCorridor)
+        );
     }
 
     #[test]
     fn a_statement_addressed_to_another_chain_does_not_cross() {
-        let statement = StarkStatement {
-            corridor_id: 0,
-            dest_chain_id: 4802,
-            nonce: 990_001,
-            kind: StatementKind::BitcoinSpv,
-            public_input_digest: [0x5au8; 32],
-        };
-        let bytes = encode_ingress(&ml_dsa_attestation(), &statement, &[0x02u8; 8]);
+        let statement = claim(0, 4802, StatementKind::BitcoinSpv);
+        let bytes = encode_ingress(&ml_dsa_attestation(), &statement, &[0x02u8; 8]).unwrap();
         assert_eq!(
-            parse_ingress(&bytes),
+            parse_ingress(&bytes, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::WrongDestination {
                 expected: QUANTOVA_DEST_CHAIN_ID,
                 found: 4802
@@ -438,9 +620,13 @@ mod tests {
 
     #[test]
     fn exactly_two_artifacts_a_third_slot_is_trailing() {
-        let mut bytes = encode_ingress(&ml_dsa_attestation(), &proof_statement(), &[0x01u8; 8]);
+        let mut bytes =
+            encode_ingress(&ml_dsa_attestation(), &proof_statement(), &[0x01u8; 8]).unwrap();
         push_slot(&mut bytes, SUITE_ML_DSA, &ml_dsa_attestation());
-        assert_eq!(parse_ingress(&bytes), Err(IngressError::TrailingBytes));
+        assert_eq!(
+            parse_ingress(&bytes, QUANTOVA_DEST_CHAIN_ID),
+            Err(IngressError::TrailingBytes)
+        );
     }
 
     #[test]
@@ -450,19 +636,22 @@ mod tests {
         bytes.push(VERSION);
         push_slot(&mut bytes, SUITE_ML_DSA, &ml_dsa_attestation());
         assert_eq!(
-            parse_ingress(&bytes),
+            parse_ingress(&bytes, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::Truncated { slot: 1 })
         );
     }
 
     #[test]
     fn empty_input_is_too_short() {
-        assert_eq!(parse_ingress(&[]), Err(IngressError::TooShort));
+        assert_eq!(
+            parse_ingress(&[], QUANTOVA_DEST_CHAIN_ID),
+            Err(IngressError::TooShort)
+        );
     }
 
     #[test]
     fn the_two_slots_may_not_be_swapped() {
-        let mut stark_payload = proof_statement().encode();
+        let mut stark_payload = stark_payload();
         stark_payload.extend_from_slice(&[0x01u8; 8]);
         let bytes = wrap_two_slots(
             SUITE_HASH_STARK,
@@ -471,7 +660,7 @@ mod tests {
             &ml_dsa_attestation(),
         );
         assert_eq!(
-            parse_ingress(&bytes),
+            parse_ingress(&bytes, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::SlotOutOfOrder {
                 slot: 0,
                 expected: SUITE_ML_DSA,
@@ -483,30 +672,28 @@ mod tests {
     #[test]
     fn negative_vector_ed25519_signature_is_unparseable() {
         let sig = ed25519_signature();
-        assert_eq!(parse_ingress(&sig), Err(IngressError::BadMagic));
+        assert_eq!(
+            parse_ingress(&sig, QUANTOVA_DEST_CHAIN_ID),
+            Err(IngressError::BadMagic)
+        );
 
         let wrapped = wrap_two_slots(
             FOREIGN_SUITE_ED25519,
             &sig,
             SUITE_HASH_STARK,
-            &proof_statement().encode(),
+            &stark_payload(),
         );
         assert_eq!(
-            parse_ingress(&wrapped),
+            parse_ingress(&wrapped, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::UnknownSuite {
                 slot: 0,
                 suite: FOREIGN_SUITE_ED25519
             })
         );
 
-        let spoofed = wrap_two_slots(
-            SUITE_ML_DSA,
-            &sig,
-            SUITE_HASH_STARK,
-            &proof_statement().encode(),
-        );
+        let spoofed = wrap_two_slots(SUITE_ML_DSA, &sig, SUITE_HASH_STARK, &stark_payload());
         assert_eq!(
-            parse_ingress(&spoofed),
+            parse_ingress(&spoofed, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::BadArtifactLength { slot: 0 })
         );
     }
@@ -514,15 +701,13 @@ mod tests {
     #[test]
     fn negative_vector_ed25519_public_key_is_unparseable() {
         let key = ed25519_public_key();
-        assert_eq!(parse_ingress(&key), Err(IngressError::BadMagic));
-        let spoofed = wrap_two_slots(
-            SUITE_ML_DSA,
-            &key,
-            SUITE_HASH_STARK,
-            &proof_statement().encode(),
-        );
         assert_eq!(
-            parse_ingress(&spoofed),
+            parse_ingress(&key, QUANTOVA_DEST_CHAIN_ID),
+            Err(IngressError::BadMagic)
+        );
+        let spoofed = wrap_two_slots(SUITE_ML_DSA, &key, SUITE_HASH_STARK, &stark_payload());
+        assert_eq!(
+            parse_ingress(&spoofed, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::BadArtifactLength { slot: 0 })
         );
     }
@@ -530,30 +715,28 @@ mod tests {
     #[test]
     fn negative_vector_secp256k1_pubkey_is_unparseable() {
         let key = secp256k1_compressed_pubkey();
-        assert_eq!(parse_ingress(&key), Err(IngressError::BadMagic));
+        assert_eq!(
+            parse_ingress(&key, QUANTOVA_DEST_CHAIN_ID),
+            Err(IngressError::BadMagic)
+        );
 
         let wrapped = wrap_two_slots(
             FOREIGN_SUITE_SECP256K1,
             &key,
             SUITE_HASH_STARK,
-            &proof_statement().encode(),
+            &stark_payload(),
         );
         assert_eq!(
-            parse_ingress(&wrapped),
+            parse_ingress(&wrapped, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::UnknownSuite {
                 slot: 0,
                 suite: FOREIGN_SUITE_SECP256K1
             })
         );
 
-        let spoofed = wrap_two_slots(
-            SUITE_ML_DSA,
-            &key,
-            SUITE_HASH_STARK,
-            &proof_statement().encode(),
-        );
+        let spoofed = wrap_two_slots(SUITE_ML_DSA, &key, SUITE_HASH_STARK, &stark_payload());
         assert_eq!(
-            parse_ingress(&spoofed),
+            parse_ingress(&spoofed, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::BadArtifactLength { slot: 0 })
         );
     }
@@ -561,15 +744,13 @@ mod tests {
     #[test]
     fn negative_vector_secp256k1_ecdsa_der_is_unparseable() {
         let sig = secp256k1_ecdsa_der();
-        assert_eq!(parse_ingress(&sig), Err(IngressError::BadMagic));
-        let spoofed = wrap_two_slots(
-            SUITE_ML_DSA,
-            &sig,
-            SUITE_HASH_STARK,
-            &proof_statement().encode(),
-        );
         assert_eq!(
-            parse_ingress(&spoofed),
+            parse_ingress(&sig, QUANTOVA_DEST_CHAIN_ID),
+            Err(IngressError::BadMagic)
+        );
+        let spoofed = wrap_two_slots(SUITE_ML_DSA, &sig, SUITE_HASH_STARK, &stark_payload());
+        assert_eq!(
+            parse_ingress(&spoofed, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::BadArtifactLength { slot: 0 })
         );
     }
@@ -577,30 +758,28 @@ mod tests {
     #[test]
     fn negative_vector_bls12_381_g1_is_unparseable() {
         let point = bls12_381_g1_compressed();
-        assert_eq!(parse_ingress(&point), Err(IngressError::BadMagic));
+        assert_eq!(
+            parse_ingress(&point, QUANTOVA_DEST_CHAIN_ID),
+            Err(IngressError::BadMagic)
+        );
 
         let wrapped = wrap_two_slots(
             FOREIGN_SUITE_BLS,
             &point,
             SUITE_HASH_STARK,
-            &proof_statement().encode(),
+            &stark_payload(),
         );
         assert_eq!(
-            parse_ingress(&wrapped),
+            parse_ingress(&wrapped, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::UnknownSuite {
                 slot: 0,
                 suite: FOREIGN_SUITE_BLS
             })
         );
 
-        let spoofed = wrap_two_slots(
-            SUITE_ML_DSA,
-            &point,
-            SUITE_HASH_STARK,
-            &proof_statement().encode(),
-        );
+        let spoofed = wrap_two_slots(SUITE_ML_DSA, &point, SUITE_HASH_STARK, &stark_payload());
         assert_eq!(
-            parse_ingress(&spoofed),
+            parse_ingress(&spoofed, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::BadArtifactLength { slot: 0 })
         );
     }
@@ -608,15 +787,13 @@ mod tests {
     #[test]
     fn negative_vector_bls12_381_g2_is_unparseable() {
         let point = bls12_381_g2_compressed();
-        assert_eq!(parse_ingress(&point), Err(IngressError::BadMagic));
-        let spoofed = wrap_two_slots(
-            SUITE_ML_DSA,
-            &point,
-            SUITE_HASH_STARK,
-            &proof_statement().encode(),
-        );
         assert_eq!(
-            parse_ingress(&spoofed),
+            parse_ingress(&point, QUANTOVA_DEST_CHAIN_ID),
+            Err(IngressError::BadMagic)
+        );
+        let spoofed = wrap_two_slots(SUITE_ML_DSA, &point, SUITE_HASH_STARK, &stark_payload());
+        assert_eq!(
+            parse_ingress(&spoofed, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::BadArtifactLength { slot: 0 })
         );
     }
@@ -630,7 +807,7 @@ mod tests {
             &bls12_381_g2_compressed(),
         );
         assert_eq!(
-            parse_ingress(&bytes),
+            parse_ingress(&bytes, QUANTOVA_DEST_CHAIN_ID),
             Err(IngressError::UnknownSuite {
                 slot: 1,
                 suite: FOREIGN_SUITE_BLS
@@ -641,34 +818,23 @@ mod tests {
 
 #[cfg(test)]
 mod same_family_boundary_tests {
-    use super::tests::ml_dsa_attestation;
+    use super::tests::{claim, ml_dsa_attestation};
     use super::*;
+    use qlc_stark::{StatementKind, QUANTOVA_DEST_CHAIN_ID};
 
     #[test]
     fn the_airlock_does_not_separate_two_corridors_of_the_same_tier_and_family() {
-        let ethereum = StarkStatement {
-            corridor_id: 2,
-            dest_chain_id: 4801,
-            nonce: 990_001,
-            kind: StatementKind::EvmLightClient,
-            public_input_digest: [9u8; 32],
-        };
-        let bytes = encode_ingress(&ml_dsa_attestation(), &ethereum, &[0x02u8; 8]);
+        let ethereum = claim(2, 4801, StatementKind::EvmLightClient);
+        let bytes = encode_ingress(&ml_dsa_attestation(), &ethereum, &[0x02u8; 8]).unwrap();
         assert!(
-            parse_ingress(&bytes).is_ok(),
+            parse_ingress(&bytes, QUANTOVA_DEST_CHAIN_ID).is_ok(),
             "an EVM proof under the Ethereum corridor crosses"
         );
 
-        let arbitrum = StarkStatement {
-            corridor_id: 6,
-            dest_chain_id: 4801,
-            nonce: 990_001,
-            kind: StatementKind::EvmLightClient,
-            public_input_digest: [9u8; 32],
-        };
-        let bytes = encode_ingress(&ml_dsa_attestation(), &arbitrum, &[0x02u8; 8]);
+        let arbitrum = claim(6, 4801, StatementKind::EvmLightClient);
+        let bytes = encode_ingress(&ml_dsa_attestation(), &arbitrum, &[0x02u8; 8]).unwrap();
         assert!(
-            parse_ingress(&bytes).is_err(),
+            parse_ingress(&bytes, QUANTOVA_DEST_CHAIN_ID).is_err(),
             "corridor six no longer carries a light-client verifier, so an EVM light-client \
              statement no longer crosses under it"
         );

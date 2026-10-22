@@ -298,15 +298,6 @@ pub fn corridor_for_id(raw: u32) -> Result<Corridor, RegistryError> {
     Ok(corridor(id))
 }
 
-pub fn upgrade_tier(
-    id: NetworkId,
-    proposed: VerificationTier,
-) -> Result<VerificationTier, RegistryError> {
-    let current = corridor(id).tier;
-    ratchet(current, proposed)
-        .map_err(|TierError::Downgrade { from, to }| RegistryError::TierDowngrade { from, to })
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TierLedger {
     recorded: std::collections::BTreeMap<u32, VerificationTier>,
@@ -392,7 +383,7 @@ mod tests {
     #[test]
     fn a_tier_upgrade_is_accepted() {
         assert_eq!(
-            upgrade_tier(NetworkId::Bitcoin, VerificationTier::LightClient),
+            TierLedger::new().upgrade(NetworkId::Bitcoin, VerificationTier::LightClient),
             Ok(VerificationTier::LightClient)
         );
     }
@@ -400,7 +391,7 @@ mod tests {
     #[test]
     fn a_tier_downgrade_is_rejected() {
         assert_eq!(
-            upgrade_tier(NetworkId::Ethereum, VerificationTier::Federated),
+            TierLedger::new().upgrade(NetworkId::Ethereum, VerificationTier::Federated),
             Err(RegistryError::TierDowngrade {
                 from: VerificationTier::LightClient,
                 to: VerificationTier::Federated,
