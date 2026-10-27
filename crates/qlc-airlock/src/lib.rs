@@ -411,7 +411,7 @@ pub fn encode_ingress(
     let mut stark_payload = claim.to_stark_statement().encode();
     stark_payload.extend_from_slice(&claim.encode());
     stark_payload.extend_from_slice(proof);
-    if stark_payload.len() > MAX_HASH_STARK_LEN {
+    if stark_payload.len() < MIN_HASH_STARK_LEN || stark_payload.len() > MAX_HASH_STARK_LEN {
         return Err(IngressError::BadArtifactLength { slot: 1 });
     }
     let mut out = Vec::new();
@@ -527,6 +527,15 @@ mod tests {
         assert_eq!(ingress.attestation().signature().len(), ML_DSA_65_SIG_LEN);
         assert!(is_proof_corridor(ingress.statement().kind));
         assert_eq!(ingress.proof(), &[0x01u8; 200][..]);
+    }
+
+    #[test]
+    fn an_empty_proof_slot_is_refused_by_the_encoder() {
+        assert_eq!(
+            encode_ingress(&ml_dsa_attestation(), &proof_statement(), &[]),
+            Err(IngressError::BadArtifactLength { slot: 1 })
+        );
+        assert!(encode_ingress(&ml_dsa_attestation(), &proof_statement(), &[0x01u8]).is_ok());
     }
 
     #[test]
