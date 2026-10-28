@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use qlc_core::VerificationTier;
 use qlc_registry::{corridor_for_id, NetworkId, RegistryError, TierLedger};
 use qlc_stark::corridors::{is_proof_corridor, nonce_from_source_ref, ProofStatement};
-use qlc_stark::{shake256_256, StarkStatement, StarkVerifier, StatementKind};
+use qlc_stark::{shake256_256, StarkStatement, StatementKind};
 
 pub const MAGIC: [u8; 4] = *b"QALK";
 pub const VERSION: u8 = 2;
@@ -86,31 +86,6 @@ pub struct Ingress {
     tier: VerificationTier,
 }
 
-pub trait AttestationVerifier {
-    fn verify(&self, statement: &[u8], signature: &[u8]) -> bool;
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VerifiedIngress {
-    statement: StarkStatement,
-    claim: ProofStatement,
-    replay_key: [u8; 32],
-}
-
-impl VerifiedIngress {
-    pub fn statement(&self) -> &StarkStatement {
-        &self.statement
-    }
-
-    pub fn claim(&self) -> &ProofStatement {
-        &self.claim
-    }
-
-    pub fn replay_key(&self) -> [u8; 32] {
-        self.replay_key
-    }
-}
-
 pub fn replay_key_of(claim: &ProofStatement) -> [u8; 32] {
     let mut bytes = Vec::with_capacity(REPLAY_DOMAIN.len() + 4 + 32);
     bytes.extend_from_slice(REPLAY_DOMAIN);
@@ -134,32 +109,6 @@ impl Ingress {
 
     pub fn proof(&self) -> &[u8] {
         &self.proof
-    }
-
-    pub fn verify(
-        &self,
-        dest_chain_id: u32,
-        attester: &impl AttestationVerifier,
-        stark: &impl StarkVerifier,
-    ) -> Result<VerifiedIngress, IngressError> {
-        let tier = check(&self.statement, &self.claim, dest_chain_id)?;
-        if tier != self.tier {
-            return Err(IngressError::CorridorKindMismatch {
-                corridor_id: self.statement.corridor_id,
-            });
-        }
-        let encoded = self.statement.encode();
-        if !attester.verify(&encoded, &self.attestation.signature) {
-            return Err(IngressError::BadAttestation);
-        }
-        if !stark.verify(&self.statement, &self.proof) {
-            return Err(IngressError::BadProof);
-        }
-        Ok(VerifiedIngress {
-            statement: self.statement.clone(),
-            claim: self.claim,
-            replay_key: replay_key_of(&self.claim),
-        })
     }
 }
 
@@ -206,42 +155,6 @@ impl Airlock {
     ) -> Result<VerificationTier, RegistryError> {
         self.tiers.upgrade(id, proposed)
     }
-
-    pub fn admit(
-        &mut self,
-        bytes: &[u8],
-        attester: &impl AttestationVerifier,
-        stark: &impl StarkVerifier,
-    ) -> Result<VerifiedIngress, IngressError> {
-        let ingress = parse_ingress(bytes, self.dest_chain_id)?;
-        let id = NetworkId::try_from(ingress.statement.corridor_id).map_err(|_| {
-            IngressError::UnknownCorridor {
-                corridor_id: ingress.statement.corridor_id,
-            }
-        })?;
-        if self.tiers.current(id) != ingress.tier {
-            return Err(IngressError::CorridorKindMismatch {
-                corridor_id: ingress.statement.corridor_id,
-            });
-        }
-        let key = replay_key_of(&ingress.claim);
-        if self.seen.contains(&key) {
-            return Err(IngressError::Replay);
-        }
-        let verified = ingress.verify(self.dest_chain_id, attester, stark)?;
-        self.seen.insert(key);
-        Ok(verified)
-    }
-}
-
-fn check(
-    statement: &StarkStatement,
-    claim: &ProofStatement,
-    dest_chain_id: u32,
-) -> Result<VerificationTier, IngressError> {
-    let tier = check_statement(statement, dest_chain_id)?;
-    check_claim(statement, claim)?;
-    Ok(tier)
 }
 
 fn check_statement(

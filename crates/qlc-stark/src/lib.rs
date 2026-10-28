@@ -108,10 +108,6 @@ pub trait StarkProver {
     fn prove(&self, statement: &StarkStatement) -> Vec<u8>;
 }
 
-pub trait StarkVerifier {
-    fn verify(&self, statement: &StarkStatement, proof: &[u8]) -> bool;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
