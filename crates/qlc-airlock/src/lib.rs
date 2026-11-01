@@ -155,6 +155,17 @@ impl Airlock {
     ) -> Result<VerificationTier, RegistryError> {
         self.tiers.upgrade(id, proposed)
     }
+
+    pub fn admit(&mut self, ingress: &Ingress) -> Result<VerificationTier, IngressError> {
+        let tier = check_statement(ingress.statement(), self.dest_chain_id)?;
+        check_claim(ingress.statement(), ingress.claim())?;
+        let key = replay_key_of(ingress.claim());
+        if self.seen.contains(&key) {
+            return Err(IngressError::Replay);
+        }
+        self.seen.insert(key);
+        Ok(tier)
+    }
 }
 
 fn check_statement(
